@@ -3,12 +3,8 @@ project(ncnn_llm)
 
 set(CMAKE_CXX_STANDARD 20)
 
-set(ncnn_DIR "3rdparty/ncnn/lib/cmake/ncnn")
-set(ncnn_INCLUDE_DIRS "3rdparty/ncnn/include")
 find_package(ncnn REQUIRED)
-include_directories(${ncnn_INCLUDE_DIRS})
 
-set(OpenCV_DIR "3rdparty/ocvm/lib/cmake/opencv4")
 find_package(OpenCV REQUIRED)
 
 include_directories(${OpenCV_INCLUDE_DIRS})
@@ -30,7 +26,7 @@ add_library(
 target_link_libraries(ncnn_llm
         ncnn_tokenizer
         ncnn
-        ${OpenCV_LIBS}
+#${OpenCV_LIBS}
 )
 
 # example

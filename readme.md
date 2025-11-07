@@ -49,3 +49,17 @@ TODO LIST:
 
 模型可以从以下链接获取：
 [nllb-600M](https://www.modelscope.cn/models/futz12/ncnn_llm_nllb_600m)
+
+## 编译和使用
+
+git clone https://github.com/futz12/ncnn_llm.git
+
+cd ncnn_llm
+
+./build.sh
+
+然后下载模型
+下载完成后 指定路径 即可运行
+
+nllb_main --model-dir ../../assets/ncnn_llm_nllb_600m/
+
