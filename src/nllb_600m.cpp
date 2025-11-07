@@ -13,8 +13,8 @@
 #include <vector>
 
 // Internal-only includes
-#include "ncnn/mat.h"
-#include "ncnn/net.h"
+#include "mat.h"
+#include "net.h"
 #include "utils/tokenizer/bpe_tokenizer.h"
 
 namespace {
@@ -147,9 +147,11 @@ public:
                   .mask_token = "<mask>",
               }))
     {
+        #if NCNN_VULKAN
         if (use_vulkan_) {
             ncnn::create_gpu_instance();
         }
+        #endif
 
         ncnn::Option opt;
         opt.num_threads = 4;
@@ -191,15 +193,19 @@ public:
     } catch (const std::exception& e) {
         std::cerr << "Initialization failed: " << e.what() << "\n";
         ok_ = false;
+        #if NCNN_VULKAN
         if (use_vulkan_) {
             ncnn::destroy_gpu_instance();
         }
+        #endif
     }
 
     ~Impl() {
+        #if NCNN_VULKAN
         if (use_vulkan_) {
             ncnn::destroy_gpu_instance();
         }
+        #endif
     }
 
     bool ok() const { return ok_; }
