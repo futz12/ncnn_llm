@@ -42,3 +42,4 @@ function add_example(repo)
 end
 
 add_example("nllb_main")
+add_example("minicpm4_main")
