@@ -31,7 +31,7 @@ jobs:
         key: xmake-${{ runner.os }}-${{ hashFiles('xmake.lua') }}
 
     - name: Configure
-      run: xmake config -m release
+      run: xmake -y config -m release
 
     - name: Build
       run: xmake -y -v
