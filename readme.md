@@ -53,6 +53,11 @@ TODO LIST:
 
 ## 编译和使用
 
+Install the latest xmake. **DO NOT `sudo apt install xmake`**
+```
+curl -fsSL https://xmake.io/shget.text | bash
+```
+
 ```
 git clone https://github.com/futz12/ncnn_llm.git
 cd ncnn_llm
