@@ -1,374 +1,565 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Qwen3 Chat API Demo</title>
+  <title>AI Chat</title>
   <style>
+    /* --- Core Variables & Theme Definitions --- */
     :root {
       --bg: #0b1018;
       --panel: #0f172a;
-      --accent: #16c27c;
+      --border: rgba(255, 255, 255, 0.08);
       --text: #e5e7eb;
-      --muted: #9ca3af;
+      --text-muted: #9ca3af;
+      --accent: #16c27c;
       --bubble-user: #16c27c;
       --bubble-assistant: #1f2937;
+      --input-bg: #0b121d;
+      --shadow: 0 10px 30px rgba(0,0,0,0.3);
     }
-    * { box-sizing: border-box; }
+
+    body.light {
+      --bg: #f3f4f6;
+      --panel: #ffffff;
+      --border: rgba(0, 0, 0, 0.08);
+      --text: #1f2937;
+      --text-muted: #6b7280;
+      --accent: #10b981;
+      --bubble-user: #10b981;
+      --bubble-assistant: #e5e7eb;
+      --input-bg: #f9fafb;
+      --shadow: 0 4px 20px rgba(0,0,0,0.08);
+    }
+
+    * { box-sizing: border-box; transition: background 0.2s, color 0.2s; }
+    
     body {
       margin: 0;
-      font-family: "PingFang SC", "SF Pro Display", "Segoe UI", system-ui, -apple-system, sans-serif;
-      background: radial-gradient(circle at 20% 10%, rgba(22,194,124,0.08), transparent 30%),
-                  radial-gradient(circle at 85% 0%, rgba(37,99,235,0.1), transparent 32%),
-                  var(--bg);
+      font-family: "SF Pro Display", "PingFang SC", system-ui, sans-serif;
+      background: var(--bg);
       color: var(--text);
-      min-height: 100vh;
+      height: 100vh;
       display: flex;
       justify-content: center;
-      padding: 24px 16px 32px;
+      padding: 15px;
     }
+
+    /* --- Layout Container --- */
     .shell {
       width: min(960px, 100%);
+      height: 94vh;
       background: var(--panel);
-      border: 1px solid rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
       border-radius: 16px;
-      box-shadow: 0 16px 48px rgba(0,0,0,0.35);
       display: flex;
       flex-direction: column;
+      box-shadow: var(--shadow);
       overflow: hidden;
     }
+
     header {
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
       display: flex;
+      justify-content: space-between;
       align-items: center;
-      gap: 12px;
-      padding: 16px 20px;
-      border-bottom: 1px solid rgba(255,255,255,0.06);
-      background: linear-gradient(90deg, rgba(22,194,124,0.18), transparent);
+      background: rgba(255,255,255,0.02);
     }
-    header h1 {
-      margin: 0;
-      font-size: 18px;
-      letter-spacing: 0.4px;
-    }
-    header .pill {
-      font-size: 12px;
-      color: #d1d5db;
-      padding: 6px 10px;
-      border-radius: 999px;
-      background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.08);
-    }
+
+    header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+
+    .header-tools { display: flex; gap: 8px; }
+
+    /* --- Chat History Area --- */
     #log {
       flex: 1;
-      padding: 18px 18px 12px;
+      padding: 20px;
       overflow-y: auto;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 16px;
       scroll-behavior: smooth;
-      }
-    .msg {
-      display: flex;
-      align-items: start;
-      gap: 8px;
     }
-    .msg.assistant { justify-content: flex-start; }
-    .msg.user { justify-content: flex-end; }
-    .msg .role {
-      display: none;
-    }
+
+    .msg { display: flex; flex-direction: column; max-width: 85%; }
+    .msg.user { align-self: flex-end; align-items: flex-end; }
+    .msg.assistant { align-self: flex-start; }
+
     .bubble {
-      max-width: 90%;
-      padding: 10px 14px;
-      border-radius: 10px;
+      padding: 10px 16px;
+      border-radius: 14px;
+      font-size: 14.5px;
       line-height: 1.6;
-      background: var(--bubble-assistant);
-      color: #e5e7eb;
-      border: 1px solid rgba(255,255,255,0.06);
-      white-space: pre-wrap;
+      word-wrap: break-word;
     }
-    .bubble img.generated {
-      display: block;
-      max-width: min(520px, 100%);
-      border-radius: 12px;
-      margin-top: 10px;
-      border: 1px solid rgba(255,255,255,0.08);
-      background: rgba(0,0,0,0.15);
-    }
-    .user .bubble {
-      background: var(--bubble-user);
-      color: #0b1f10;
-      border: 1px solid rgba(0,0,0,0.08);
-    }
-    form {
-      padding: 14px;
-      border-top: 1px solid rgba(255,255,255,0.06);
-      background: #0b121d;
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 10px;
-      align-items: center;
-    }
-    textarea {
-      width: 100%;
-      min-height: 64px;
-      max-height: 160px;
-      padding: 10px 12px;
-      border-radius: 10px;
-      border: 1px solid rgba(255,255,255,0.08);
-      background: #0f1a29;
-      color: #e5e7eb;
-      font-size: 15px;
-      resize: vertical;
-      outline: none;
-    }
-    textarea:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 1px rgba(22,194,124,0.25);
-    }
-    button {
-      padding: 12px 16px;
-      border: none;
-      border-radius: 10px;
-      background: linear-gradient(135deg, #16c27c, #12d670);
-      color: #05160d;
-      font-weight: 700;
-      cursor: pointer;
-      box-shadow: 0 8px 18px rgba(22,194,124,0.25);
-      transition: transform 0.08s ease, box-shadow 0.08s ease, opacity 0.2s ease;
-      min-width: 96px;
-    }
-    button:active { transform: translateY(1px); box-shadow: 0 4px 10px rgba(22,194,124,0.2); }
-    button:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; }
-    details.think {
-      margin-top: 10px;
-      background: #1a2435;
-      border-radius: 8px;
-      border: 1px solid #1f2d44;
-      padding: 8px 10px 10px;
-    }
-    details.think summary {
-      cursor: pointer;
-      color: #a3b3d3;
-      outline: none;
-    }
-    details.think pre {
-      margin: 6px 0 0;
-      white-space: pre-wrap;
-      line-height: 1.5;
-      color: #cbd5e1;
-    }
+    .user .bubble { background: var(--bubble-user); color: #05160d; font-weight: 500; border-bottom-right-radius: 2px; }
+    .assistant .bubble { background: var(--bubble-assistant); color: var(--text); border: 1px solid var(--border); border-bottom-left-radius: 2px; }
+
+    /* Think Tags & Generated Media */
+    details.think { margin-top: 8px; background: rgba(0,0,0,0.1); border-radius: 8px; padding: 8px; border-left: 3px solid var(--accent); }
+    details.think summary { cursor: pointer; color: var(--text-muted); font-size: 12px; }
+    details.think pre { margin-top: 6px; font-size: 13px; color: var(--text-muted); white-space: pre-wrap; }
+    img.generated { max-width: 100%; border-radius: 8px; margin-top: 10px; border: 1px solid var(--border); }
+
+    /* --- Bottom Control Bar --- */
     .bar {
       display: flex;
       align-items: center;
       gap: 12px;
-      padding: 0 14px 10px;
-      color: var(--muted);
-      font-size: 13px;
+      padding: 8px 16px;
+      background: rgba(0,0,0,0.05);
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--text-muted);
     }
-    .switch {
-      display: inline-flex;
+    .bar input[type="checkbox"] { accent-color: var(--accent); }
+
+    /* --- Input Area --- */
+    .input-container {
+      padding: 16px;
+      background: var(--input-bg);
+      border-top: 1px solid var(--border);
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 70px;
+      max-height: 200px;
+      background: transparent;
+      border: none;
+      color: var(--text);
+      resize: vertical;
+      outline: none;
+      font-size: 15px;
+      padding-bottom: 10px;
+    }
+
+    .action-row {
+      display: flex;
+      justify-content: flex-end;
       align-items: center;
-      gap: 6px;
+      margin-top: 8px;
+    }
+
+    /* --- Professional Send Button Group --- */
+    .btn-group {
+      display: flex;
+      background: var(--accent);
+      border-radius: 8px;
+      position: relative;
+    }
+
+    #send-btn {
+      background: transparent;
+      border: none;
+      color: #05160d;
+      padding: 8px 18px;
       cursor: pointer;
-      user-select: none;
+      font-weight: 700;
+      border-right: 1px solid rgba(0,0,0,0.1);
     }
-    .switch input { accent-color: var(--accent); }
-    .tip { margin-left: auto; color: #9ca3af; }
-    @media (max-width: 640px) {
-      form { grid-template-columns: 1fr; }
-      button { width: 100%; }
+
+    .dropdown-trigger {
+      background: transparent;
+      border: none;
+      color: #05160d;
+      padding: 0 10px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      font-size: 10px;
     }
+
+    .dropdown-menu {
+      position: absolute;
+      bottom: 120%;
+      right: 0;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+      width: 220px;
+      display: none;
+      z-index: 100;
+    }
+    .dropdown-menu.show { display: block; }
+
+    .menu-item {
+      padding: 10px 14px;
+      font-size: 13px;
+      cursor: pointer;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .menu-item:hover { background: rgba(255,255,255,0.05); }
+    body.light .menu-item:hover { background: rgba(0,0,0,0.05); }
+    .menu-item.active::after { content: '✓'; font-weight: bold; color: var(--accent); }
+
+    .icon-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .icon-btn:hover { background: rgba(255,255,255,0.05); }
   </style>
 </head>
-<body>
-  <div class="shell">
-    <header>
-      <h1>Qwen3 Chat API Demo</h1>
-      <span class="pill">OpenAI /v1/chat/completions</span>
-    </header>
-    <div id="log"></div>
-    <div class="bar">
-      <label class="switch">
-        <input type="checkbox" id="stream" checked>
-        <span>流式输出</span>
-      </label>
-      <label class="switch">
-        <input type="checkbox" id="think">
-        <span>禁用思考标签</span>
-      </label>
-      <label class="switch">
-        <input type="checkbox" id="imgBase64" checked>
-        <span>图片用Base64返回</span>
-      </label>
-      <span class="tip">模型：qwen3-0.6b · 接口：localhost:8080</span>
+<body class="dark">
+
+<div class="shell">
+  <header>
+    <h1 id="ui-title">Chat AI</h1>
+    <div class="header-tools">
+      <button class="icon-btn" onclick="toggleLanguage()" id="ui-lang-btn">🌐 Language</button>
+      <button class="icon-btn" onclick="toggleTheme()" id="ui-theme-btn">🌓 Style</button>
     </div>
-    <form id="form">
-      <textarea id="input" placeholder="和 Qwen3 聊聊吧..." required></textarea>
-      <button id="send" type="submit">发送</button>
-    </form>
+  </header>
+
+  <div id="log"></div>
+
+  <div class="bar">
+    <label><input type="checkbox" id="stream" checked> <span id="ui-stream">Stream</span></label>
+    <label><input type="checkbox" id="think"> <span id="ui-think">Disable Think</span></label>
+    <label><input type="checkbox" id="imgBase64" checked> <span id="ui-img">Base64</span></label>
   </div>
-  <script>
-    const log = document.getElementById('log');
-    const form = document.getElementById('form');
-    const input = document.getElementById('input');
-    const sendBtn = document.getElementById('send');
-    const streamBox = document.getElementById('stream');
-    const thinkBox = document.getElementById('think');
-    const imgBase64Box = document.getElementById('imgBase64');
-    const history = [];
-    const renderedArtifacts = new Set();
 
-    function escapeHtml(str) {
-      return str
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
+  <div class="input-container">
+    <textarea id="input"></textarea>
+    <div class="action-row">
+      <div class="btn-group">
+        <button id="send-btn" onclick="handleSendClick()">Send</button>
+        <button class="dropdown-trigger" id="drop-trigger">▼</button>
+        
+        <div class="dropdown-menu" id="drop-menu">
+          <div class="menu-item" data-mode="enter" id="ui-menu-enter">Press Enter to send</div>
+          <div class="menu-item" data-mode="alt-enter" id="ui-menu-alt">Press Alt+Enter to send</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  /**
+   * Translation Resources
+   */
+  const i18n = {
+    'zh-CN': {
+      title: 'AI智能对话',
+      langBtn: '🌐 切换语言',
+      themeBtn: '🌓 切换主题',
+      stream: '流式输出',
+      think: '禁用思考',
+      img: 'Base64图片',
+      send: '发送',
+      placeholderEnter: '输入内容... (Enter 发送, Alt+Enter 换行)',
+      placeholderAlt: '输入内容... (Alt+Enter 发送, Enter 换行)',
+      menuEnter: '按Enter键发送',
+      menuAlt: '按Alt+Enter键发送',
+      statusConnecting: '…正在连接服务器',
+      statusError: '发送失败：',
+      thinkTitle: '思考过程',
+      thinkGenerating: '思考过程（生成中）',
+      generatedImg: '生成的图片：'
+    },
+    'en': {
+      title: 'AI Chat',
+      langBtn: '🌐 Language',
+      themeBtn: '🌓 Style',
+      stream: 'Streaming',
+      think: 'No Thinking',
+      img: 'Base64 Img',
+      send: 'Send',
+      placeholderEnter: 'Type message... (Enter to send, Alt+Enter for new line)',
+      placeholderAlt: 'Type message... (Alt+Enter to send, Enter for new line)',
+      menuEnter: 'Press Enter to send',
+      menuAlt: 'Press Alt+Enter to send',
+      statusConnecting: '...Connecting to server',
+      statusError: 'Error: ',
+      thinkTitle: 'Thinking Process',
+      thinkGenerating: 'Thinking (Generating...)',
+      generatedImg: 'Generated Image: '
     }
+  };
 
-    function renderAssistantStreaming(raw) {
-      if (!raw) return '';
-      let html = '';
-      let pos = 0;
-      while (pos < raw.length) {
-        const start = raw.indexOf('<think>', pos);
-        if (start === -1) {
-          html += escapeHtml(raw.slice(pos));
-          break;
-        }
-        html += escapeHtml(raw.slice(pos, start));
-        const close = raw.indexOf('</think>', start + 7);
-        if (close === -1) {
-          const thinkText = raw.slice(start + 7);
-          html += `<details class="think" open><summary>思考过程（生成中）</summary><pre>${escapeHtml(thinkText)}</pre></details>`;
-          pos = raw.length;
-          break;
-        } else {
-          const thinkText = raw.slice(start + 7, close);
-          html += `<details class="think"><summary>思考过程</summary><pre>${escapeHtml(thinkText)}</pre></details>`;
-          pos = close + 8;
-        }
+  /**
+   * UI Elements & State
+   */
+  const log = document.getElementById('log');
+  const input = document.getElementById('input');
+  const sendBtn = document.getElementById('send-btn');
+  const streamBox = document.getElementById('stream');
+  const thinkBox = document.getElementById('think');
+  const imgBase64Box = document.getElementById('imgBase64');
+  const dropTrigger = document.getElementById('drop-trigger');
+  const dropMenu = document.getElementById('drop-menu');
+  const menuItems = document.querySelectorAll('.menu-item');
+
+  const history = [];
+  const renderedArtifacts = new Set();
+
+  /**
+   * Cookie Management
+   */
+  function setCookie(name, value) {
+    document.cookie = `${name}=${value};path=/;max-age=${60*60*24*365}`;
+  }
+  function getCookie(name) {
+    const v = document.cookie.match('(^|;) ?' + name + '=([^;]*)(;|$)');
+    return v ? v[2] : null;
+  }
+
+  // Detect browser language or load from cookie
+  let currentLang = getCookie('chat_lang');
+  if (!currentLang) {
+    currentLang = navigator.language.startsWith('zh') ? 'zh-CN' : 'en';
+  }
+  let currentShortcut = getCookie('chat_shortcut') || 'enter';
+  let currentTheme = getCookie('chat_theme') || 'dark';
+
+  /**
+   * UI Update Logic
+   */
+  function applySettings() {
+    const t = i18n[currentLang];
+    
+    // Theme
+    document.body.className = currentTheme;
+    
+    // Localization
+    document.getElementById('ui-title').innerText = t.title;
+    document.getElementById('ui-lang-btn').innerText = t.langBtn;
+    document.getElementById('ui-theme-btn').innerText = t.themeBtn;
+    document.getElementById('ui-stream').innerText = t.stream;
+    document.getElementById('ui-think').innerText = t.think;
+    document.getElementById('ui-img').innerText = t.img;
+    document.getElementById('send-btn').innerText = t.send;
+    document.getElementById('ui-menu-enter').innerText = t.menuEnter;
+    document.getElementById('ui-menu-alt').innerText = t.menuAlt;
+
+    // Shortcut UI
+    menuItems.forEach(item => {
+      item.classList.toggle('active', item.dataset.mode === currentShortcut);
+    });
+    input.placeholder = currentShortcut === 'enter' ? t.placeholderEnter : t.placeholderAlt;
+  }
+
+  function toggleLanguage() {
+    currentLang = currentLang === 'en' ? 'zh-CN' : 'en';
+    setCookie('chat_lang', currentLang);
+    applySettings();
+  }
+
+  function toggleTheme() {
+    currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    setCookie('chat_theme', currentTheme);
+    applySettings();
+  }
+
+  // Initial UI Setup
+  applySettings();
+
+  /**
+   * Dropdown Menu Handlers
+   */
+  dropTrigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isShowing = dropMenu.classList.toggle('show');
+    dropTrigger.textContent = isShowing ? '▲' : '▼';
+  });
+
+  document.addEventListener('click', () => {
+    dropMenu.classList.remove('show');
+    dropTrigger.textContent = '▼';
+  });
+
+  menuItems.forEach(item => {
+    item.addEventListener('click', () => {
+      currentShortcut = item.dataset.mode;
+      setCookie('chat_shortcut', currentShortcut);
+      applySettings();
+    });
+  });
+
+  /**
+   * Core Messaging Logic (Restored from your version)
+   */
+  function escapeHtml(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function renderAssistantStreaming(raw) {
+    if (!raw) return '';
+    const t = i18n[currentLang];
+    let html = '';
+    let pos = 0;
+    while (pos < raw.length) {
+      const start = raw.indexOf('<think>', pos);
+      if (start === -1) {
+        html += escapeHtml(raw.slice(pos));
+        break;
       }
-      return html || '&nbsp;';
+      html += escapeHtml(raw.slice(pos, start));
+      const close = raw.indexOf('</think>', start + 7);
+      if (close === -1) {
+        const thinkText = raw.slice(start + 7);
+        html += `<details class="think" open><summary>${t.thinkGenerating}</summary><pre>${escapeHtml(thinkText)}</pre></details>`;
+        pos = raw.length;
+        break;
+      } else {
+        const thinkText = raw.slice(start + 7, close);
+        html += `<details class="think"><summary>${t.thinkTitle}</summary><pre>${escapeHtml(thinkText)}</pre></details>`;
+        pos = close + 8;
+      }
     }
+    return html || '&nbsp;';
+  }
 
-    function addMessage(role, text, allowHTML = false) {
-      const wrap = document.createElement('div');
-      wrap.className = 'msg ' + (role === 'user' ? 'user' : 'assistant');
-      wrap.innerHTML = '<div class="role">' + role + '</div><div class="bubble"></div>';
-      const bubble = wrap.querySelector('.bubble');
-      if (allowHTML) bubble.innerHTML = text;
-      else bubble.textContent = text;
-      log.appendChild(wrap);
+  function addMessage(role, text, allowHTML = false) {
+    const wrap = document.createElement('div');
+    wrap.className = 'msg ' + (role === 'user' ? 'user' : 'assistant');
+    wrap.innerHTML = `<div class="bubble"></div>`;
+    const bubble = wrap.querySelector('.bubble');
+    if (allowHTML) bubble.innerHTML = text;
+    else bubble.textContent = text;
+    log.appendChild(wrap);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function updateLastAssistantHTML(html) {
+    const bubbles = log.querySelectorAll('.msg.assistant .bubble');
+    if (bubbles.length) {
+      bubbles[bubbles.length - 1].innerHTML = html;
       log.scrollTop = log.scrollHeight;
     }
+  }
 
-    function updateLastAssistantHTML(html) {
-      const bubbles = log.querySelectorAll('.msg.assistant .bubble');
-      if (bubbles.length) {
-        bubbles[bubbles.length - 1].innerHTML = html;
-        log.scrollTop = log.scrollHeight;
-      }
+  function renderArtifacts(artifacts) {
+    if (!Array.isArray(artifacts)) return;
+    const t = i18n[currentLang];
+    for (const a of artifacts) {
+      if (!a || typeof a !== 'object') continue;
+      const mime = a.mime_type || 'image/png';
+      const isImage = (a.kind === 'image') || (typeof mime === 'string' && mime.startsWith('image/'));
+      if (!isImage) continue;
+      let src = '';
+      if (typeof a.url === 'string' && a.url) src = a.url;
+      else if (typeof a.data_base64 === 'string' && a.data_base64) src = `data:${mime};base64,${a.data_base64}`;
+      if (!src || renderedArtifacts.has(src)) continue;
+      renderedArtifacts.add(src);
+      addMessage('assistant', `${t.generatedImg}<img class="generated" src="${src}">`, true);
     }
+  }
 
-    function renderArtifacts(artifacts) {
-      if (!Array.isArray(artifacts)) return;
-      for (const a of artifacts) {
-        if (!a || typeof a !== 'object') continue;
-        const mime = a.mime_type || 'image/png';
-        const isImage = (a.kind === 'image') || (typeof mime === 'string' && mime.startsWith('image/'));
-        if (!isImage) continue;
-        let src = '';
-        if (typeof a.url === 'string' && a.url) src = a.url;
-        else if (typeof a.data_base64 === 'string' && a.data_base64) src = `data:${mime};base64,${a.data_base64}`;
-        if (!src) continue;
-        if (renderedArtifacts.has(src)) continue;
-        renderedArtifacts.add(src);
-        addMessage('assistant', `生成的图片：<img class="generated" src="${src}">`, true);
+  async function sendMessage(content) {
+    if (!content.trim()) return;
+    sendBtn.disabled = true;
+    const t = i18n[currentLang];
+    
+    const stream = streamBox.checked;
+    const disableThinking = thinkBox.checked;
+    const imageDelivery = imgBase64Box.checked ? 'base64' : 'file';
+
+    history.push({ role: 'user', content });
+    addMessage('user', content);
+    addMessage('assistant', t.statusConnecting);
+
+    const payload = {
+      messages: [{ role: 'system', content: 'You are a professional and helpful assistant.' }, ...history],
+      stream,
+      enable_thinking: !disableThinking,
+      mcp_image_delivery: imageDelivery,
+      temperature: 0.7,
+      top_p: 0.9
+    };
+
+    let assistantText = '';
+    try {
+      const resp = await fetch('/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      
+      if (!resp.ok) {
+        const msg = await resp.text();
+        throw new Error('HTTP ' + resp.status + ': ' + msg);
       }
-    }
 
-    async function sendMessage(content) {
-      sendBtn.disabled = true;
-      const stream = streamBox.checked;
-      const disableThinking = thinkBox.checked;
-      const imageDelivery = imgBase64Box.checked ? 'base64' : 'file';
-      history.push({ role: 'user', content });
-      addMessage('user', content);
-      addMessage('assistant', '…生成中');
-
-      const payload = {
-        model: 'qwen3-0.6b',
-        messages: [{ role: 'system', content: 'You are a helpful assistant.' }, ...history],
-        stream,
-        enable_thinking: !disableThinking,
-        mcp_image_delivery: imageDelivery,
-        temperature: 0.7,
-        top_p: 0.9
-      };
-
-      let assistantText = '';
-      try {
-        const resp = await fetch('/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        if (!resp.ok) {
-          const msg = await resp.text();
-          throw new Error('HTTP ' + resp.status + ': ' + msg);
-        }
-
-        if (stream) {
-          const reader = resp.body.getReader();
-          const decoder = new TextDecoder();
-          let buf = '';
-          let stream_done = false;
-          while (!stream_done) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buf += decoder.decode(value, { stream: true });
-            const parts = buf.split('\n\n');
-            buf = parts.pop();
-            for (const block of parts) {
-              const line = block.trim();
-              if (!line.startsWith('data:')) continue;
-              const data = line.slice(5).trim();
-              if (data === '[DONE]') { stream_done = true; break; }
-              try {
-                const j = JSON.parse(data);
-                const delta = j.choices?.[0]?.delta?.content || '';
-                assistantText += delta;
-                updateLastAssistantHTML(renderAssistantStreaming(assistantText));
-                if (j.artifacts) renderArtifacts(j.artifacts);
-              } catch (err) {
-                console.warn('parse chunk failed', err);
-              }
-            }
-            if (stream_done) break;
+      if (stream) {
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        let stream_done = false;
+        while (!stream_done) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const parts = buf.split('\n\n');
+          buf = parts.pop();
+          for (const block of parts) {
+            const line = block.trim();
+            if (!line.startsWith('data:')) continue;
+            const data = line.slice(5).trim();
+            if (data === '[DONE]') { stream_done = true; break; }
+            try {
+              const j = JSON.parse(data);
+              const delta = j.choices?.[0]?.delta?.content || '';
+              assistantText += delta;
+              updateLastAssistantHTML(renderAssistantStreaming(assistantText));
+              if (j.artifacts) renderArtifacts(j.artifacts);
+            } catch (err) { console.warn('parse chunk failed', err); }
           }
-        } else {
-          const j = await resp.json();
-          assistantText = j.choices?.[0]?.message?.content || '';
-          updateLastAssistantHTML(renderAssistantStreaming(assistantText));
-          if (j.artifacts) renderArtifacts(j.artifacts);
         }
-        history.push({ role: 'assistant', content: assistantText });
-      } catch (err) {
-        updateLastAssistantHTML(escapeHtml('出错了：' + err.message));
-      } finally {
-        sendBtn.disabled = false;
+      } else {
+        const j = await resp.json();
+        assistantText = j.choices?.[0]?.message?.content || '';
+        updateLastAssistantHTML(renderAssistantStreaming(assistantText));
+        if (j.artifacts) renderArtifacts(j.artifacts);
+      }
+      history.push({ role: 'assistant', content: assistantText });
+    } catch (err) {
+      updateLastAssistantHTML(escapeHtml(t.statusError + err.message));
+    } finally {
+      sendBtn.disabled = false;
+    }
+  }
+
+  function handleSendClick() {
+    const text = input.value;
+    input.value = '';
+    sendMessage(text);
+  }
+
+  /**
+   * Keyboard Shortcut Logic
+   */
+  input.addEventListener('keydown', (e) => {
+    if (currentShortcut === 'enter') {
+      if (e.key === 'Enter' && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        handleSendClick();
+      } else if (e.key === 'Enter' && e.altKey) {
+        // Alt+Enter for New Line
+        const start = input.selectionStart;
+        input.value = input.value.substring(0, start) + "\n" + input.value.substring(input.selectionEnd);
+        input.selectionStart = input.selectionEnd = start + 1;
+      }
+    } else {
+      // Alt+Enter for Send
+      if (e.key === 'Enter' && e.altKey) {
+        e.preventDefault();
+        handleSendClick();
       }
     }
+  });
+</script>
 
-    form.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const text = input.value.trim();
-      if (!text) return;
-      input.value = '';
-      sendMessage(text);
-    });
-  </script>
 </body>
 </html>
