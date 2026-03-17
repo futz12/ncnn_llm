@@ -29,8 +29,7 @@ static std::mt19937 rng(std::random_device{}());
 const static int attn_cnt = 6;
 const static int sconv_cnt = 18;
 const static int gdr_cnt = 18;
-// const static int rope_head_dim = 128;
-const static int rope_head_dim = 32;
+const static int rope_head_dim = 64;
 const static float rope_theta = 10000000;
 
 struct qwen3_5_0p8b_ctx {
@@ -778,12 +777,15 @@ void generate_rope_embed_cache_vision_mrope_interleaved(int seqlen, int embed_di
     // assert mrope[0] + mrope[1] + mrope[2] == embed_dim / 2
 
     // const float partial_rotary_factor = 0.25f;
+    const float partial_rotary_factor = 0.5f;
+
+    const int rotate_dim = embed_dim * partial_rotary_factor;
 
     // prepare inv_freq
-    std::vector<float> inv_freq(embed_dim / 2);
-    for (int i = 0; i < embed_dim / 2; i++)
+    std::vector<float> inv_freq(rotate_dim / 2);
+    for (int i = 0; i < rotate_dim / 2; i++)
     {
-        inv_freq[i] = 1.f / powf(rope_theta, (float)(i * 2) / embed_dim);
+        inv_freq[i] = 1.f / powf(rope_theta, (float)(i * 2) / rotate_dim);
     }
 
     cos_cache.create(embed_dim / 2, seqlen);
@@ -796,6 +798,8 @@ void generate_rope_embed_cache_vision_mrope_interleaved(int seqlen, int embed_di
 
         for (int j = 0; j < embed_dim / 2; j++)
         {
+            if (j < rotate_dim / 2)
+            {
             int pos = position_id;
             if (i < image_pad_index)
             {
@@ -848,6 +852,12 @@ void generate_rope_embed_cache_vision_mrope_interleaved(int seqlen, int embed_di
             const float sin_val = sinf(t);
             *cos_ptr++ = cos_val;
             *sin_ptr++ = sin_val;
+            }
+            else
+            {
+            *cos_ptr++ = 1.0f;
+            *sin_ptr++ = 0.0f;
+            }
         }
     }
 }
