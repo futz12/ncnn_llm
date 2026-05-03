@@ -31,12 +31,14 @@ ncnn_embedding::ncnn_embedding(const std::string& model_path, bool use_vulkan, i
 
         if (use_vulkan) {
             printf("[ncnn_embedding] Vulkan enabled, using device %d\n", vulkan_device >= 0 ? vulkan_device : 0);
+#if NCNN_VULKAN
             if (vulkan_device >= 0) {
                 text_encoder_net->opt.vulkan_device_index = vulkan_device;
                 if (vision_encoder_net) {
                     vision_encoder_net->opt.vulkan_device_index = vulkan_device;
                 }
             }
+#endif
             text_encoder_net->opt.use_bf16_storage = true;
             text_encoder_net->opt.use_fp16_arithmetic = false;
             text_encoder_net->opt.use_fp16_storage = false;
