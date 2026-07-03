@@ -41,9 +41,11 @@ ncnn_llm_gpt::ncnn_llm_gpt(const std::string& model_path, bool use_vulkan, int n
             // Only decoder_net uses Vulkan for compute-intensive operations
 
             // Set specific Vulkan device BEFORE enabling vulkan compute
+#if NCNN_VULKAN
             if (vulkan_device >= 0) {
                 decoder_net->opt.vulkan_device_index = vulkan_device;
             }
+#endif
             decoder_net->opt.use_bf16_storage = true;
             // decoder_net->opt.use_bf16_packed = true;
             decoder_net->opt.use_fp16_arithmetic = false;
