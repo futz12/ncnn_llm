@@ -214,3 +214,11 @@ install(TARGETS
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
 )
+
+# ncnn_llm_server: OpenAI-compatible HTTP service (third-party benchmarks / serving)
+if(TARGET ncnn_llm)
+    add_executable(ncnn_llm_server examples/ncnn_llm_server.cpp)
+    target_include_directories(ncnn_llm_server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    find_package(Threads REQUIRED)
+    target_link_libraries(ncnn_llm_server PRIVATE ncnn_llm Threads::Threads)
+endif()
