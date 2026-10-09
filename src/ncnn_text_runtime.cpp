@@ -22,7 +22,15 @@ ncnn::Mat llm_run_text_embed(ncnn::Net& embed_net, const std::vector<int>& input
 }
 
 ncnn::Mat llm_run_text_embed(ncnn::Net& embed_net, int token_id) {
-    ncnn::Mat input_id_mat(1, 1, (void*)&token_id);
+    // Do not view a 4-byte stack int as a [1,1] Mat and then clone it:
+    // Mat::clone() copies total() * elemsize bytes, and Mat::total() returns
+    // cstep * c where cstep is the 16-byte aligned step. For a [1,1] float Mat
+    // cstep == alignSize(4, 16) / 4 == 4, so the copy reads 16 bytes from a
+    // 4-byte object (AddressSanitizer: stack-buffer-overflow).
+    // Back it with a 16-byte aligned buffer of the same shape instead.
+    alignas(16) int token_id_buf[4] = {0, 0, 0, 0};
+    token_id_buf[0] = token_id;
+    ncnn::Mat input_id_mat(1, 1, (void*)token_id_buf);
     input_id_mat = input_id_mat.clone();
 
     ncnn::Mat token_embed;
