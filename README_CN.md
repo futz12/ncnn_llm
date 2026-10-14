@@ -410,6 +410,37 @@ ncnn_llm/
 
 - QQ 群：`767178345`
 
+## MiniCPM-V 4.7 实验性 CPU 回归
+
+测试、参考驱动和原生探针统一维护在 [tests/test_minicpm.py](tests/test_minicpm.py)。
+CMake 只在构建目录生成 C++ 探针；不会在源码目录生成额外测试文件。
+Python 3.9+ 仅用于测试，推理库无需 Python。未安装 Python 时默认不构建这些探针；
+可用 `-DNCNN_LLM_BUILD_MINICPM_TESTS=OFF` 明确关闭，或设为 `ON` 强制检查依赖。
+
+```sh
+# 沿用上文 ncnn / JSON 依赖配置；BUILD 可为任意已有构建目录。
+cmake -S . -B "$BUILD" -DNCNN_LLM_BUILD_MINICPM_TESTS=ON
+cmake --build "$BUILD" -j2
+ctest --test-dir "$BUILD" --output-on-failure
+python tests/test_minicpm.py smoke --build-dir "$BUILD"
+python tests/test_minicpm.py numerical --build-dir "$BUILD" --model-dir "$HF_MODEL"
+python tests/test_minicpm.py real --help
+python tests/test_minicpm.py history
+```
+
+`smoke` 覆盖原生边界、旧视觉接口、分词器配置、流式语言/缓存和视觉导出；
+`numerical` 使用 Pillow、官方 HF 元数据和 tokenizer 验证预处理、位置和原生 BPE。
+相应 Python 环境需要 NumPy、Pillow、PyTorch、Transformers（包含 MiniCPM-V 4.7）、
+safetensors、tokenizers、Jinja2 和 ncnn Python binding。缺失依赖、探针或单测跳过均使所选测试组失败。
+仓库原有 CTest 保持不变，其可选旧模型测试缺少权重时仍会自行报告跳过。
+
+`real` 复用已转换 FP32 包、独立 HF 视觉/decoder 参考和两张测试图片，串行运行，
+不下载或重新转换模型；第二张图片的原生历史答案需显式传入，不冒充独立 HF 结果。
+`vision-reference` 可从本地原始 checkpoint 重新计算 HF 参考，但只读被测转换产物，
+并校验运行前后 SHA256 不变。数值/图片结果与限制可用 `history` 查看。
+正式转换入口会在加载大权重前拒绝不支持的配置；底层小型图测试仍保留通用性。
+当前范围为单 RGB 缩略图、16x、CPU FP32；不代表 GPU、量化、视频、多图或细节切片已验证。
+
 ## 许可证
 
 Apache License 2.0。详见 [LICENSE](LICENSE)。

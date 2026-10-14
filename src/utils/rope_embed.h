@@ -46,7 +46,10 @@ void generate_rope_embed_cache_LongRoPE(int seqlen,
                                       const float* LONG_FACTOR,
                                       int ORIGINAL_MAX_POSITION_EMBEDDINGS = 32768);
 
+// Legacy single-placeholder interface retained for existing callers.
 void inject_image_embeds(std::vector<int>& token_ids, ncnn::Mat& token_embed, int& image_pad_index, int image_pad_id, const ncnn::Mat& image_embeds);
+// Pre-expanded image spans keep prompt tokenization intact (e.g. MiniCPM canvas).
+void inject_image_embeds(std::vector<int>& token_ids, ncnn::Mat& token_embed, int& image_pad_index, int image_pad_id, const ncnn::Mat& image_embeds, bool expanded_placeholder_span);
 
 void generate_rope_embed_cache_vision_mrope(int seqlen, 
                                           int embed_dim, 
@@ -90,3 +93,29 @@ void generate_rope_embed_cache_3d(int seqlen,
                                   float rope_theta,
                                   ncnn::Mat& cos_cache,
                                   ncnn::Mat& sin_cache);
+
+
+#include <array>
+#include <cstdint>
+#include <string>
+namespace ncnn_llm { namespace minicpm {
+struct MarkerIds {
+    int image, image_start, image_end, slice_start, slice_end, newline;
+};
+struct CanvasPositions {
+    // One {T,H,W} tuple per sequence token; not the separate causal text channel.
+    std::vector<std::array<int64_t, 3> > positions;
+    int64_t rope_delta;
+    int64_t next_position;
+};
+// Exactly one image, explicit start/end markers, no padding or video/slices.
+// base_position is a scalar offset for an already-computed chat prefix.
+CanvasPositions canvas_positions(const std::vector<int>& ids, const MarkerIds& markers,
+                                  int patch_rows, int patch_cols, const std::string& mode,
+                                  int64_t base_position = 0);
+// Row-major [sequence,rotary_dim/2] cache for ncnn RotaryEmbed. Sections are
+// checkpoint mrope_section values; do not hardcode Qwen defaults in the caller.
+void interleaved_rope(const CanvasPositions& positions, int rotary_dim, double theta,
+                      const std::array<int,3>& sections,
+                      std::vector<float>& cos_cache, std::vector<float>& sin_cache);
+} }

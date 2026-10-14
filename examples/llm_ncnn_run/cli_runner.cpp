@@ -16,6 +16,8 @@ TemplateType detect_template_type(const std::string& model_path) {
         json config;
         ifs >> config;
         
+        if (config.value("setting",json::object()).value("vision",json::object()).value("type",std::string())=="minicpm_v4_7")
+            return TemplateType::MINICPM_V47;
         if (config.contains("type")) {
             std::string type = config["type"].get<std::string>();
             if (type == "youtu_llm") {
@@ -27,6 +29,7 @@ TemplateType detect_template_type(const std::string& model_path) {
             if (type == "minicpm5") {
                 return TemplateType::MINICPM5;
             }
+            if (type == "minicpm_v4_7" || type == "minicpmv4_7") return TemplateType::MINICPM_V47;
             if (type == "qwen3.5") {
                 return TemplateType::QWEN35;
             }
@@ -47,12 +50,16 @@ int run_cli(const Options& opt,
     const char* template_name = template_type == TemplateType::YOUTU ? "YouTu" :
                                 template_type == TemplateType::QWEN3 ? "Qwen3" :
                                 template_type == TemplateType::MINICPM5 ? "MiniCPM5" :
+                                template_type == TemplateType::MINICPM_V47 ? "MiniCPM-V-4.7" :
                                 template_type == TemplateType::QWEN35 ? "Qwen3.5" : "ChatML";
     std::cout << "Using template: " << template_name << "\n";
 
+    const bool allow_tools = template_type != TemplateType::MINICPM_V47;
+    if (!allow_tools && !builtin_tools.empty())
+        std::cout << "MiniCPM-V-4.7 experimental chat: built-in tools disabled.\n";
     std::string system_prompt = "You are a helpful assistant.";
     std::shared_ptr<ncnn_llm_gpt_ctx> ctx;
-    if (!builtin_tools.empty() && model.supports_tool_calling()) {
+    if (allow_tools && !builtin_tools.empty() && model.supports_tool_calling()) {
         ctx = model.define_tools(nullptr, builtin_tools, system_prompt, template_type);
     } else {
         std::string prompt = apply_chat_template(template_type, {{"system", system_prompt}}, {}, false, false);
@@ -70,7 +77,7 @@ int run_cli(const Options& opt,
 
         if (first_turn && has_image) {
             std::string user_message = apply_chat_template(template_type, {
-                {"user", "<|vision_start|><|image_pad|><|vision_end|>" + input}
+                {"user", model.image_prompt_placeholder() + input}
             }, {}, true, opt.enable_thinking);
             ctx = model.prefill(user_message, image, ctx);
             first_turn = false;
@@ -93,7 +100,7 @@ int run_cli(const Options& opt,
         cfg.enable_perf = opt.enable_perf;
         cfg.perf_level = opt.perf_level;
 
-        cfg.tool_callback = [&](const json& call) {
+        if (allow_tools) cfg.tool_callback = [&](const json& call) {
             json result;
             try {
                 std::string fname = call.at("name").get<std::string>();

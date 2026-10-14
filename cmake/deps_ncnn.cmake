@@ -6,6 +6,10 @@ option(USE_SYSTEM_NCNN "Build with system libncnn" OFF)
 
 if(USE_SYSTEM_NCNN)
     find_package(Threads)
+endif()
+
+# CPU-only SDKs do not ship shader compiler dependencies.
+if(USE_SYSTEM_NCNN AND NCNN_LLM_ENABLE_VULKAN)
     find_package(SPIRV-Tools QUIET)
     find_package(SPIRV-Tools-opt QUIET)
     find_package(glslang QUIET)

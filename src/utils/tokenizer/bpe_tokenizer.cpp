@@ -10,7 +10,7 @@
 #include <stdexcept>
 
 // ---------------- I/O helpers ----------------
-std::vector<std::string> BpeTokenizer::LoadVocab(const std::string& vocab_path) {
+std::vector<std::string> BpeTokenizer::LoadVocab(const std::string& vocab_path, bool literal_bytes) {
     std::ifstream ifs(vocab_path, std::ios::binary);
     if (!ifs.is_open()) {
         throw std::runtime_error("Failed to open vocab file: " + vocab_path);
@@ -22,9 +22,9 @@ std::vector<std::string> BpeTokenizer::LoadVocab(const std::string& vocab_path) 
         if (!line.empty() && line.back() == '\r') {
             line.pop_back();
         }
-        if (line == "\\n") {
+        if (!literal_bytes && line == "\\n") {
             vocab.push_back("\n");
-        } else if (line == "\\r") {
+        } else if (!literal_bytes && line == "\\r") {
             vocab.push_back("\r");
         } else {
             vocab.push_back(line);
@@ -42,7 +42,7 @@ std::unordered_map<std::string, int> BpeTokenizer::BuildTokenToId(const std::vec
     return m;
 }
 
-std::unordered_map<std::string, int> BpeTokenizer::LoadMergesRank(const std::string& merges_path) {
+std::unordered_map<std::string, int> BpeTokenizer::LoadMergesRank(const std::string& merges_path, bool literal_records) {
     std::ifstream ifs(merges_path);
     if (!ifs.is_open()) {
         throw std::runtime_error("Failed to open merges file: " + merges_path);
@@ -52,11 +52,17 @@ std::unordered_map<std::string, int> BpeTokenizer::LoadMergesRank(const std::str
     std::string line;
     int rank = 0;
     while (std::getline(ifs, line)) {
-        if (line.empty() || line[0] == '#') continue;
+        if (line.empty() || (!literal_records && line[0] == '#')) continue;
         std::istringstream iss(line);
         std::string a, b;
-        if (!(iss >> a >> b)) continue;
-        merges.emplace(PairKey(a, b), rank++);
+        if (!(iss >> a >> b)) {
+            if(literal_records) throw std::runtime_error("malformed MiniCPM merge record");
+            continue;
+        }
+        std::string extra;
+        if(literal_records && (iss >> extra)) throw std::runtime_error("excess MiniCPM merge fields");
+        const auto inserted=merges.emplace(PairKey(a, b), rank++);
+        if(literal_records && !inserted.second) throw std::runtime_error("duplicate MiniCPM merge record");
     }
     return merges;
 }
@@ -346,7 +352,8 @@ BpeTokenizer::BpeTokenizer(BpeTokenizer&& other) noexcept
       additional_special_id_set_(std::move(other.additional_special_id_set_)),
       use_byte_encoder_(other.use_byte_encoder_),
       byte_encoder_(std::move(other.byte_encoder_)),
-      byte_decoder_(std::move(other.byte_decoder_)) {
+      byte_decoder_(std::move(other.byte_decoder_)), minicpm_(std::move(other.minicpm_)),
+      vocab_path_(std::move(other.vocab_path_)), merges_path_(std::move(other.merges_path_)) {
     // 迁移缓存（为安全起见加锁）
     std::lock_guard<std::mutex> lk(other.cache_mu_);
     bpe_cache_ = std::move(other.bpe_cache_);
@@ -369,6 +376,8 @@ BpeTokenizer& BpeTokenizer::operator=(BpeTokenizer&& other) noexcept {
         use_byte_encoder_ = other.use_byte_encoder_;
         byte_encoder_ = std::move(other.byte_encoder_);
         byte_decoder_ = std::move(other.byte_decoder_);
+        minicpm_ = std::move(other.minicpm_);
+        vocab_path_ = std::move(other.vocab_path_); merges_path_ = std::move(other.merges_path_);
         bpe_cache_ = std::move(other.bpe_cache_);
         // cache_mu_ 仍为当前对象自己的 mutex
     }
@@ -383,6 +392,7 @@ BpeTokenizer BpeTokenizer::LoadFromFiles(const std::string& vocab_path,
                                          bool fallback_to_chars,
                                          bool use_byte_encoder) {
     BpeTokenizer tok;
+    tok.vocab_path_ = vocab_path; tok.merges_path_ = merges_path;
     tok.id_to_token_ = LoadVocab(vocab_path);
     if (tok.id_to_token_.empty()) {
         throw std::runtime_error("Vocab is empty: " + vocab_path);
@@ -499,10 +509,15 @@ std::vector<int> BpeTokenizer::encode(const std::string& text,
         if (use_byte_encoder_) {
             // Mode 2: Byte-Level Encoding
             // Encode raw bytes to mapped unicode chars
-            std::string encoded_s = ByteEncode(buffer);
-            // Perform BPE on the entire encoded string
-            const auto& toks = BpeForPieceCached(encoded_s);
-            TokensToIds(toks, ids);
+            if (minicpm_) {
+                const std::string normalized = NormalizeMiniCPMNFC(buffer);
+                for (const auto& piece : PretokenizeMiniCPM(normalized))
+                    TokensToIds(BpeForPieceCached(ByteEncode(piece)), ids);
+            } else {
+                std::string encoded_s = ByteEncode(buffer);
+                const auto& toks = BpeForPieceCached(encoded_s);
+                TokensToIds(toks, ids);
+            }
         } else {
             auto pieces = PretokenizeSentencePiece(buffer);
             for (const auto& p : pieces) {
@@ -580,13 +595,14 @@ std::string BpeTokenizer::decode(const std::vector<int>& ids, bool skip_special_
             id == special_ids_.mask_id ||
             (additional_special_id_set_.find(id) != additional_special_id_set_.end());
 
+        if (minicpm_) is_special = minicpm_->special_ids.count(id) != 0;
         if (skip_special_tokens && is_special) continue;
 
-        if (tok == "\\t")
+        if (!minicpm_ && tok == "\\t")
             s += '\t';
-        else if (tok == "\\n")
+        else if (!minicpm_ && tok == "\\n")
             s += '\n';
-        else if (tok == "\\r")
+        else if (!minicpm_ && tok == "\\r")
             s += '\r';
         else
             s += tok;
@@ -616,4 +632,216 @@ std::string BpeTokenizer::decode(const std::vector<int>& ids, bool skip_special_
         }
     }
     return s;
+}
+
+// MiniCPM's supported checkpoint regex is interpreted deterministically. Unicode
+// classification and NFC records come from the checkpoint tokenizers backend.
+namespace {
+const char* kMiniCPMRegex = R"REGEX((?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?[\p{L}\p{M}]+|\p{N}| ?[^\s\p{L}\p{M}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+)REGEX";
+bool scalar(uint32_t cp) { return cp <= 0x10ffff && !(cp >= 0xd800 && cp <= 0xdfff); }
+void append_utf8(std::string& s, uint32_t cp) {
+    if (cp < 0x80) s.push_back(static_cast<char>(cp));
+    else if (cp < 0x800) {
+        s.push_back(static_cast<char>(0xc0 | cp >> 6)); s.push_back(static_cast<char>(0x80 | (cp & 63)));
+    } else if (cp < 0x10000) {
+        s.push_back(static_cast<char>(0xe0 | cp >> 12)); s.push_back(static_cast<char>(0x80 | ((cp >> 6) & 63)));
+        s.push_back(static_cast<char>(0x80 | (cp & 63)));
+    } else {
+        s.push_back(static_cast<char>(0xf0 | cp >> 18)); s.push_back(static_cast<char>(0x80 | ((cp >> 12) & 63)));
+        s.push_back(static_cast<char>(0x80 | ((cp >> 6) & 63))); s.push_back(static_cast<char>(0x80 | (cp & 63)));
+    }
+}
+std::string hex_token(const std::string& hex) {
+    if (hex.empty() || hex.size()%2) throw std::runtime_error("invalid MiniCPM added-token hex");
+    std::string token;
+    for (size_t i=0;i<hex.size();i+=2) {
+        auto digit=[](char c)->int { if(c>='0'&&c<='9')return c-'0'; if(c>='a'&&c<='f')return c-'a'+10; return -1; };
+        const int a=digit(hex[i]),b=digit(hex[i+1]);
+        if(a<0||b<0) throw std::runtime_error("invalid MiniCPM added-token hex");
+        token.push_back(static_cast<char>(a*16+b));
+    }
+    return token;
+}
+}
+
+void BpeTokenizer::LoadMiniCPMTokenizer(const std::string& path) {
+    if (!use_byte_encoder_) throw std::runtime_error("MiniCPM pretokenizer requires byte-level BPE");
+    std::ifstream file(path);
+    if (!file) throw std::runtime_error("cannot open MiniCPM tokenizer artifact: "+path);
+    std::string line;
+    if(!std::getline(file,line)||line!="minicpm_v47_tokenizer_v1") throw std::runtime_error("unsupported MiniCPM tokenizer artifact");
+    if(!std::getline(file,line)||line!=std::string("regex ")+kMiniCPMRegex) throw std::runtime_error("unsupported MiniCPM tokenizer regex");
+    auto literal_vocab=LoadVocab(vocab_path_,true);
+    auto literal_merges=LoadMergesRank(merges_path_,true);
+    auto data=std::make_shared<MiniCPMData>();
+    std::vector<std::string> added;
+    std::unordered_set<int> added_ids;
+    bool ended=false,have_source=false,have_backend=false;
+    while(std::getline(file,line)) {
+        if(line=="END") { ended=true; break; }
+        std::istringstream input(line); std::string kind;
+        if(!(input>>kind)) throw std::runtime_error("empty MiniCPM tokenizer record");
+        uint32_t a,b,c;
+        if(kind=="R") {
+            if(!(input>>a>>b>>c)||a>b||!scalar(a)||!scalar(b)||!c||c>=4096 ||
+               (!data->ranges.empty() && a<=data->ranges.back()[1]))
+                throw std::runtime_error("invalid MiniCPM Unicode range");
+            data->ranges.push_back({{a,b,c}});
+        } else if(kind=="D") {
+            unsigned count;
+            if(!(input>>a>>count)||!scalar(a)||count==0||count>32||data->decompositions.count(a))
+                throw std::runtime_error("invalid MiniCPM decomposition");
+            std::vector<uint32_t> values(count);
+            for(auto& cp:values) if(!(input>>cp)||!scalar(cp)) throw std::runtime_error("invalid MiniCPM decomposition scalar");
+            data->decompositions.emplace(a,std::move(values));
+        } else if(kind=="C") {
+            if(!(input>>a>>b)||!scalar(a)||b==0||b>255||!data->combining_classes.emplace(a,b).second)
+                throw std::runtime_error("invalid MiniCPM combining class");
+        } else if(kind=="P") {
+            if(!(input>>a>>b>>c)||!scalar(a)||!scalar(b)||!scalar(c)||
+               !data->compositions.emplace((static_cast<uint64_t>(a)<<32)|b,c).second)
+                throw std::runtime_error("invalid MiniCPM composition");
+        } else if(kind=="A") {
+            int id, special; std::string hex;
+            if(!(input>>id>>special>>hex)||id<0||static_cast<size_t>(id)>=literal_vocab.size()||
+               (special!=0&&special!=1)||!added_ids.insert(id).second)
+                throw std::runtime_error("invalid MiniCPM added token");
+            std::string token=hex_token(hex);
+            if(literal_vocab[id]!=token) throw std::runtime_error("MiniCPM tokenizer artifact/vocabulary mismatch");
+            added.push_back(token);
+            if(special) data->special_ids.insert(id);
+        } else if(kind=="source"||kind=="backend") {
+            std::string value;
+            if(!(input>>value)||value.empty()) throw std::runtime_error("invalid MiniCPM artifact provenance");
+            if(kind=="source") {
+                if(have_source||value.size()!=64||value.find_first_not_of("0123456789abcdef")!=std::string::npos) throw std::runtime_error("invalid MiniCPM source digest");
+                have_source=true;
+            } else { if(have_backend) throw std::runtime_error("duplicate MiniCPM backend"); have_backend=true; }
+        } else throw std::runtime_error("unknown MiniCPM tokenizer artifact record: "+kind);
+        std::string extra;
+        if(input>>extra) throw std::runtime_error("excess MiniCPM artifact fields");
+    }
+    if(!ended||!have_source||!have_backend||data->ranges.empty()||data->decompositions.empty()||
+       data->combining_classes.empty()||data->compositions.empty()||added.empty())
+        throw std::runtime_error("incomplete MiniCPM tokenizer artifact");
+    while(std::getline(file,line)) if(!line.empty()) throw std::runtime_error("data after MiniCPM artifact END");
+    id_to_token_=std::move(literal_vocab);
+    token_to_id_=BuildTokenToId(id_to_token_);
+    merges_rank_=std::move(literal_merges);
+    SetAdditionalSpecialTokens(added,false);
+    minicpm_=std::move(data);
+    std::lock_guard<std::mutex> lock(cache_mu_);
+    bpe_cache_.clear();
+}
+
+uint32_t BpeTokenizer::MiniCPMFlags(uint32_t cp) const {
+    const auto& ranges=minicpm_->ranges;
+    auto it=std::upper_bound(ranges.begin(),ranges.end(),cp,
+        [](uint32_t key,const std::array<uint32_t,3>& range){return key<range[0];});
+    if(it==ranges.begin()) return 0;
+    --it;
+    return cp<=(*it)[1]?(*it)[2]:0;
+}
+
+std::string BpeTokenizer::NormalizeMiniCPMNFC(const std::string& text) const {
+    auto ccc=[&](uint32_t cp)->unsigned {
+        auto it=minicpm_->combining_classes.find(cp); return it==minicpm_->combining_classes.end()?0:it->second;
+    };
+    std::vector<uint32_t> decomposed;
+    auto ordered_append=[&](uint32_t cp) { decomposed.push_back(cp); };
+    size_t pos=0;
+    while(pos<text.size()) {
+        uint32_t cp; size_t length;
+        if(!NextUtf8(text,pos,cp,length)||!scalar(cp)||(length==2&&cp<0x80)||
+           (length==3&&cp<0x800)||(length==4&&cp<0x10000))
+            throw std::runtime_error("MiniCPM input is not valid UTF-8");
+        if(cp>=0xac00&&cp<0xac00+11172) {
+            const uint32_t index=cp-0xac00;
+            ordered_append(0x1100+index/588); ordered_append(0x1161+(index%588)/28);
+            if(index%28) ordered_append(0x11a7+index%28);
+        } else {
+            auto it=minicpm_->decompositions.find(cp);
+            if(it==minicpm_->decompositions.end()) ordered_append(cp);
+            else for(uint32_t d:it->second) ordered_append(d);
+        }
+    }
+    // Sort nonstarter runs stably; avoid quadratic insertion for long marks.
+    size_t run=0;
+    for(size_t i=0;i<=decomposed.size();++i) {
+        if(i==decomposed.size()||ccc(decomposed[i])==0) {
+            std::stable_sort(decomposed.begin()+run,decomposed.begin()+i,
+                [&](uint32_t a,uint32_t b){return ccc(a)<ccc(b);});
+            run=i+1;
+        }
+    }
+    std::vector<uint32_t> composed;
+    size_t starter=0; bool have_starter=false; unsigned previous_class=0;
+    for(uint32_t cp:decomposed) {
+        const unsigned cls=ccc(cp); uint32_t replacement=0;
+        if(have_starter&&(previous_class<cls||previous_class==0)) {
+            uint32_t a=composed[starter];
+            if(a>=0x1100&&a<0x1113&&cp>=0x1161&&cp<0x1176)
+                replacement=0xac00+((a-0x1100)*21+cp-0x1161)*28;
+            else if(a>=0xac00&&a<0xac00+11172&&(a-0xac00)%28==0&&cp>0x11a7&&cp<0x11c3)
+                replacement=a+cp-0x11a7;
+            else {
+                auto it=minicpm_->compositions.find((static_cast<uint64_t>(a)<<32)|cp);
+                if(it!=minicpm_->compositions.end()) replacement=it->second;
+            }
+        }
+        if(replacement) composed[starter]=replacement;
+        else {
+            if(cls==0) { starter=composed.size();have_starter=true; }
+            composed.push_back(cp); previous_class=cls;
+        }
+    }
+    std::string result; result.reserve(text.size());
+    for(uint32_t cp:composed) append_utf8(result,cp);
+    return result;
+}
+
+std::vector<std::string> BpeTokenizer::PretokenizeMiniCPM(const std::string& text) const {
+    std::vector<uint32_t> cps,flags; std::vector<size_t> offsets;
+    size_t byte=0;
+    while(byte<text.size()) { uint32_t cp;size_t n;offsets.push_back(byte);NextUtf8(text,byte,cp,n);cps.push_back(cp);flags.push_back(MiniCPMFlags(cp)); }
+    offsets.push_back(text.size());
+    const size_t n=cps.size(); std::vector<std::string> pieces;
+    auto lm=[&](size_t i){return i<n&&(flags[i]&3)!=0;};
+    auto ws=[&](size_t i){return i<n&&(flags[i]&8)!=0;};
+    auto nl=[&](size_t i){return i<n&&(cps[i]==10||cps[i]==13);};
+    auto punct=[&](size_t i){return i<n&&(flags[i]&15)==0;};
+    auto fold=[&](size_t i,char c){
+        const std::string order="strevmld"; size_t bit=order.find(c);
+        return i<n&&bit!=std::string::npos&&(flags[i]&(1u<<(4+bit)))!=0;
+    };
+    for(size_t i=0;i<n;) {
+        size_t end=i;
+        if(cps[i]==39) {
+            for(const std::string contraction:{"s","t","re","ve","m","ll","d"}) {
+                size_t j=i+1; for(char c:contraction) {if(!fold(j,c))break;++j;}
+                if(j==i+1+contraction.size()) {end=j;break;}
+            }
+        }
+        if(end==i) {
+            size_t j=i;
+            if(!nl(i)&&!(flags[i]&(1|4))&&lm(i+1)) ++j;
+            if(lm(j)) {while(lm(j))++j;end=j;}
+        }
+        if(end==i&&(flags[i]&4)) end=i+1;
+        if(end==i) {
+            size_t j=i;
+            if(cps[j]==32&&punct(j+1)) ++j;
+            if(punct(j)) {while(punct(j))++j;while(nl(j))++j;end=j;}
+        }
+        if(end==i&&ws(i)) {
+            size_t j=i,last_newline=i;
+            while(ws(j)) {if(nl(j))last_newline=j+1;++j;}
+            if(last_newline>i) end=last_newline;
+            else if(j==n) end=j;
+            else end=(j-i>1)?j-1:j;
+        }
+        if(end==i) throw std::runtime_error("unmatched MiniCPM pretokenizer scalar");
+        pieces.push_back(text.substr(offsets[i],offsets[end]-offsets[i])); i=end;
+    }
+    return pieces;
 }

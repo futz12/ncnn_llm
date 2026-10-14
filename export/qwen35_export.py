@@ -64,12 +64,16 @@ def _rotate_half(x):
     return torch.cat((-b, a), dim=-1)
 
 
-def _apply_rope(q, k, cos_half, sin_half, rotary_dim):
+def _apply_rope(q, k, cos_half, sin_half, rotary_dim, head_dim=None):
     # Runtime cos/sin inputs contain half-width values.  HF's Qwen3.5 rotary
     # embedding duplicates them across the rotated width before applying
     # rotate_half, while the remaining head dimensions pass through.
     cos = torch.cat((cos_half, cos_half), dim=-1).unsqueeze(1)
     sin = torch.cat((sin_half, sin_half), dim=-1).unsqueeze(1)
+    if rotary_dim == head_dim:
+        # A full-width rotary head has no pass-through tail. Emitting its
+        # zero-width Crop/Concat is invalid in ncnn even though Torch accepts it.
+        return q * cos + _rotate_half(q) * sin, k * cos + _rotate_half(k) * sin
     q_rot, q_pass = q[..., :rotary_dim], q[..., rotary_dim:]
     k_rot, k_pass = k[..., :rotary_dim], k[..., rotary_dim:]
     q_rot = q_rot * cos + _rotate_half(q_rot) * sin
@@ -161,7 +165,7 @@ class Qwen35Decoder(nn.Module):
         q = _rms(q, attn.q_norm.weight, attn.q_norm.eps).transpose(1, 2)
         k = _rms(k, attn.k_norm.weight, attn.k_norm.eps).transpose(1, 2)
         v = v.transpose(1, 2)
-        q, k = _apply_rope(q, k, cos_half, sin_half, self.rope_dim)
+        q, k = _apply_rope(q, k, cos_half, sin_half, self.rope_dim, self.head_dim)
         if self.num_kv != self.num_q:
             out = F.scaled_dot_product_attention(
                 q, k, v, attn_mask=mask, scale=attn.scaling, enable_gqa=True)
@@ -368,7 +372,8 @@ def _shape_args(seq_len, hidden, rope_half, conv_dim, conv_kernel, heads,
 
 
 def export(model_dir, output_dir, int8_dir="", prefix="", keep_fp32=True,
-           do_bf16=True, do_int8=True, cross_check=True, bits=8):
+           do_bf16=True, do_int8=True, cross_check=True, bits=8,
+           vision_exporter=None):
     from transformers import AutoConfig, Qwen3_5ForConditionalGeneration
 
     os.makedirs(output_dir, exist_ok=True)
@@ -492,7 +497,8 @@ def export(model_dir, output_dir, int8_dir="", prefix="", keep_fp32=True,
 
     vision_setting = {"type": "close"}
     if hasattr(root_cfg, "vision_config") and root_cfg.vision_config:
-        v_cfg = export_qwen35_vision(model_dir, output_dir, prefix=f"{prefix}_", do_bf16=False)
+        export_vision = vision_exporter or export_qwen35_vision
+        v_cfg = export_vision(model_dir, output_dir, prefix=f"{prefix}_", do_bf16=False)
         if v_cfg:
             vision_setting = v_cfg
 
@@ -560,7 +566,7 @@ def export(model_dir, output_dir, int8_dir="", prefix="", keep_fp32=True,
         int8_dir = int8_dir or output_dir.rstrip("/\\") + f"_int{bits}"
         quantize_model.quantize_model_dir(output_dir, int8_dir, tool,
                                           bits=bits, block=64, method="minmax")
-    print(f"[success] BF16: {output_dir}")
+    print(f"[success] {'BF16' if do_bf16 else 'FP32'}: {output_dir}")
     if do_int8:
         print(f"[success] INT{bits}: {int8_dir}")
 

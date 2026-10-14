@@ -2,6 +2,7 @@
 #include <sstream>
 #include <algorithm>
 #include <iostream>
+#include <stdexcept>
 
 static std::string lstrip_newlines(const std::string& s) {
     size_t start = s.find_first_not_of('\n');
@@ -365,6 +366,56 @@ static std::string apply_youtu_template(
     return prompt.str();
 }
 
+
+// MiniCPM-V-4.7's checkpoint template differs from Qwen3.5 even when
+// thinking is disabled. Keep this restricted chat path independent of Qwen.
+static std::string apply_minicpm_v47_template(const std::vector<Message>& messages,
+    const std::vector<json>& tools, bool add_generation_prompt, bool enable_thinking) {
+    if (messages.empty()) throw std::invalid_argument("MiniCPM requires messages");
+    if (!tools.empty()) throw std::invalid_argument("MiniCPM experimental chat does not support tools");
+    auto trim = [](const std::string& s) {
+        const auto first=s.find_first_not_of(" \t\r\n\v\f");
+        return first==std::string::npos ? std::string() : s.substr(first,s.find_last_not_of(" \t\r\n\v\f")-first+1);
+    };
+    int last_query=-1;
+    for (size_t i=0;i<messages.size();++i) {
+        const auto& m=messages[i];
+        if (!m.tool_calls.empty() || (m.role!="system" && m.role!="user" && m.role!="assistant"))
+            throw std::invalid_argument("MiniCPM experimental chat supports only system/user/assistant messages");
+        if (m.role=="system" && i!=0) throw std::invalid_argument("System message must be first");
+        const auto content=trim(m.content);
+        if (m.role=="user" && !(content.rfind("<tool_response>",0)==0 &&
+            content.size()>=16 && content.compare(content.size()-16,16,"</tool_response>")==0)) last_query=(int)i;
+    }
+    // CLI incremental prefill may render only the initial system fragment.
+    if(last_query<0 && !(messages.size()==1 && messages[0].role=="system" && !add_generation_prompt))
+        throw std::invalid_argument("MiniCPM requires a user query");
+    std::ostringstream out;
+    for(size_t i=0;i<messages.size();++i) {
+        const auto& m=messages[i];
+        auto content=trim(m.content), reasoning=trim(m.reasoning_content);
+        out<<"<|im_start|>"<<m.role<<"\n";
+        if(m.role=="assistant") {
+            const auto close=content.find("</think>");
+            if(m.reasoning_content.empty() && close!=std::string::npos) {
+                auto before=content.substr(0,close);
+                const auto open=before.rfind("<think>");
+                reasoning=trim(open==std::string::npos?before:before.substr(open+7));
+                content=lstrip_newlines(content.substr(content.rfind("</think>")+8));
+            }
+            out<<"<think>\n";
+            if((int)i>last_query) out<<reasoning;
+            out<<"\n</think>\n\n";
+        }
+        out<<content<<"<|im_end|>\n";
+    }
+    if(add_generation_prompt) {
+        out<<"<|im_start|>assistant\n<think>\n";
+        if(!enable_thinking) out<<"\n</think>\n\n";
+    }
+    return out.str();
+}
+
 // ==========================================
 // PUBLIC API
 // ==========================================
@@ -394,6 +445,8 @@ std::string apply_chat_template(
     bool enable_thinking
 ) {
     switch (type) {
+        case TemplateType::MINICPM_V47:
+            return apply_minicpm_v47_template(messages, tools, add_generation_prompt, enable_thinking);
         case TemplateType::YOUTU:
             return apply_youtu_template(messages, tools, add_generation_prompt);
         case TemplateType::QWEN3:

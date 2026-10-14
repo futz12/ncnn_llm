@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.15)
 project(ncnn_llm LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -214,3 +214,67 @@ install(TARGETS
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
 )
+
+# Optional consolidated MiniCPM tests. Python is a test-generation dependency,
+# never a dependency of ncnn_llm or the installed runtime.
+find_package(Python3 3.9 QUIET COMPONENTS Interpreter)
+set(_minicpm_tests_default OFF)
+if(BUILD_TESTING AND Python3_Interpreter_FOUND)
+    set(_minicpm_tests_default ON)
+endif()
+option(NCNN_LLM_BUILD_MINICPM_TESTS "Build consolidated MiniCPM regression probes (requires Python 3)" ${_minicpm_tests_default})
+if(NCNN_LLM_BUILD_MINICPM_TESTS)
+    if(NOT Python3_Interpreter_FOUND)
+        message(FATAL_ERROR "MiniCPM tests require Python 3. Set NCNN_LLM_BUILD_MINICPM_TESTS=OFF to build the runtime without Python.")
+    endif()
+    set(_minicpm_test_sources "${CMAKE_CURRENT_BINARY_DIR}/minicpm-test-sources")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_minicpm.py")
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_minicpm.py"
+                emit-native --build-dir "${CMAKE_CURRENT_BINARY_DIR}"
+        RESULT_VARIABLE _minicpm_emit_result
+    )
+    if(NOT _minicpm_emit_result EQUAL 0)
+        message(FATAL_ERROR "Could not generate consolidated MiniCPM native test sources")
+    endif()
+    # MiniCPM image planning and canvas MRoPE regression tests.
+    add_executable(test_minicpm_vision "${_minicpm_test_sources}/test_minicpm_vision.cpp")
+    target_link_libraries(test_minicpm_vision PRIVATE ncnn_llm)
+    add_test(NAME test_minicpm_vision COMMAND test_minicpm_vision)
+    add_executable(test_minicpm_runtime "${_minicpm_test_sources}/test_minicpm_runtime.cpp")
+    target_link_libraries(test_minicpm_runtime PRIVATE ncnn_llm)
+
+    add_test(NAME test_minicpm_runtime_limits COMMAND test_minicpm_runtime --check-limits)
+
+    # Lightweight prompt probe: no model weights or ncnn runtime needed.
+    add_executable(minicpm_prompt_probe "${_minicpm_test_sources}/minicpm_prompt_probe.cpp" src/utils/prompt.cpp)
+    target_include_directories(minicpm_prompt_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(minicpm_prompt_probe PRIVATE nlohmann_json::nlohmann_json)
+
+    add_executable(test_minicpm_tokenizer_config "${_minicpm_test_sources}/test_minicpm_tokenizer_config.cpp")
+    target_include_directories(test_minicpm_tokenizer_config PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(test_minicpm_tokenizer_config PRIVATE nlohmann_json::nlohmann_json)
+    add_test(NAME test_minicpm_tokenizer_config COMMAND test_minicpm_tokenizer_config "${CMAKE_CURRENT_BINARY_DIR}/tokenizer-config-fixtures")
+
+    add_executable(minicpm_tokenizer_probe "${_minicpm_test_sources}/minicpm_tokenizer_probe.cpp")
+    target_link_libraries(minicpm_tokenizer_probe PRIVATE ncnn_tokenizer nlohmann_json::nlohmann_json)
+    add_executable(minicpm_decoder_probe "${_minicpm_test_sources}/minicpm_decoder_probe.cpp")
+    target_link_libraries(minicpm_decoder_probe PRIVATE ncnn_llm)
+    add_executable(minicpm_component_probe "${_minicpm_test_sources}/minicpm_component_probe.cpp")
+    target_link_libraries(minicpm_component_probe PRIVATE ncnn)
+    add_executable(minicpm_trained_vision_probe "${_minicpm_test_sources}/minicpm_trained_vision_probe.cpp")
+    target_link_libraries(minicpm_trained_vision_probe PRIVATE ncnn_llm)
+
+    # Reference probes exercise the same existing utility objects used by runtime.
+    add_executable(minicpm_vision_reference_probe "${_minicpm_test_sources}/minicpm_vision_reference_probe.cpp")
+    target_link_libraries(minicpm_vision_reference_probe PRIVATE ncnn_llm)
+    foreach(probe minicpm_resize_probe minicpm_preprocess_probe)
+        add_library(${probe} SHARED "${_minicpm_test_sources}/${probe}.cpp" src/utils/image_utils.cpp)
+        set_target_properties(${probe} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+        target_include_directories(${probe} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        target_link_libraries(${probe} PRIVATE ncnn)
+    endforeach()
+    add_executable(test_vision_utils "${_minicpm_test_sources}/test_vision_utils.cpp")
+    target_link_libraries(test_vision_utils PRIVATE ncnn_llm)
+    add_test(NAME test_vision_utils COMMAND test_vision_utils)
+endif()

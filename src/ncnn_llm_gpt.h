@@ -1,4 +1,7 @@
-﻿#pragma once
+#pragma once
+
+// Versioned build capability for downstream adapters; absent in older runtimes.
+#define NCNN_LLM_MINICPM_V47_RUNTIME 1
 
 #include <array>
 #include <cassert>
@@ -28,6 +31,7 @@
 #include "utils/image_utils.h"
 #include "utils/perf_profiler.h"
 #include "kernel/lm_head.h"
+#include <map>
 
 using nlohmann::json;
 
@@ -73,6 +77,7 @@ public:
     KVCache kv_cache;
     int cur_token = 0;
     int position_id = 0;
+    int image_count = 0;
     ncnn_llm::PrefillPerfStats prefill_perf;
 };
 
@@ -89,6 +94,7 @@ public:
         }
         dst->cur_token = cur_token;
         dst->position_id = position_id;
+        dst->image_count = image_count;
         dst->prefill_perf = prefill_perf;
         return dst;
     }
@@ -124,10 +130,30 @@ public:
         }
         dst->cur_token = cur_token;
         dst->position_id = position_id;
+        dst->image_count = image_count;
         dst->prefill_perf = prefill_perf;
         return dst;
     }
 };
+
+class ncnn_llm_gpt;
+
+namespace ncnn_llm {
+// Extra graph partitions and learned positions required by MiniCPM's windowed ViT.
+// Execution is part of ncnn_llm_gpt's existing vision feature pipeline.
+class MiniCPMVisionState {
+    friend class ::ncnn_llm_gpt;
+    MiniCPMVisionState() = default;
+    MiniCPMVisionState(const MiniCPMVisionState&) = delete;
+    MiniCPMVisionState& operator=(const MiniCPMVisionState&) = delete;
+    minicpm::MarkerIds markers;
+    std::string mode;
+    std::map<std::string, std::shared_ptr<ncnn::Net>> graphs;
+    std::vector<float> position;
+    int hidden = 0, output_hidden = 0, patch = 0, position_side = 0, scale = 0, max_slices = 0;
+    bool slice_mode = false;
+};
+}
 
 class ncnn_llm_gpt {
 private:
@@ -139,6 +165,7 @@ private:
     std::shared_ptr<ncnn::Net> vision_embed_pos;
     std::shared_ptr<ncnn::Net> vision_encoder;
     std::shared_ptr<BpeTokenizer> bpe;
+    std::shared_ptr<ncnn_llm::MiniCPMVisionState> minicpm_vision;
 
 protected:
     std::string model_type;
@@ -177,7 +204,8 @@ protected:
     enum Vision_Type {
         VISION_CLOSE = 0,
         VISION_VIT = 1,
-        VISION_QWEN3_5_VL = 2
+        VISION_QWEN3_5_VL = 2,
+        VISION_MINICPM_V4_7 = 3
     } vision_type;
 
     enum VisionRoPE_Type {
@@ -189,6 +217,14 @@ protected:
     std::vector<nlohmann::json> tools;
 
 public:
+    // Vision-only entry points also permit parity checks without loading the LLM.
+    static std::shared_ptr<ncnn_llm::MiniCPMVisionState> load_minicpm_vision(
+        const std::string& directory, const nlohmann::json& config, int threads);
+    static void validate_minicpm_vision_manifest(const nlohmann::json& manifest);
+    static void validate_minicpm_thumbnail(const ncnn_llm::minicpm::Thumbnail& thumbnail);
+    static ncnn::Mat encode_minicpm_vision(const ncnn_llm::MiniCPMVisionState& state,
+        const ncnn::Mat& bgr, ncnn_llm::minicpm::Thumbnail& thumbnail);
+
     ncnn_llm_gpt(const std::string& model_path, bool use_vulkan = false, int num_threads = 0, int vulkan_device = 0, bool use_bf16 = true, bool force_naive = false);
 
     std::shared_ptr<ncnn_llm_gpt_ctx> prefill(const std::string& input_text) const;
@@ -198,6 +234,7 @@ public:
 
     std::shared_ptr<ncnn_llm_gpt_ctx> define_tools(const std::shared_ptr<ncnn_llm_gpt_ctx>& ctx, const std::vector<nlohmann::json>& tools, const std::string& system_prompt = "You are a helpful assistant.", TemplateType template_type = TemplateType::CHATML);
 
+    std::string image_prompt_placeholder() const { return minicpm_vision ? "<image>\n" : "<|vision_start|><|image_pad|><|vision_end|>"; }
     bool supports_tool_calling() const { return tool_call_id >= 0; }
     bool supports_vision() const { return vision_type != Vision_Type::VISION_CLOSE; }
     const std::string& get_model_type() const { return model_type; }

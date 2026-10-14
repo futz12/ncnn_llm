@@ -9,6 +9,8 @@
 #include <limits>
 #include <mutex>
 #include <map>
+#include <memory>
+#include <array>
 #include "tokenizer_types.h"
 
 class BpeTokenizer {
@@ -19,6 +21,10 @@ public:
                                       bool add_special_if_missing = true,
                                       bool fallback_to_chars = true,
                                       bool use_byte_encoder = false);
+
+    // Exact, model-specific NFC + regex tables. Call after loading/registering tokens.
+    // Unsupported/malformed artifacts fail closed; never affects legacy models.
+    void LoadMiniCPMTokenizer(const std::string& artifact_path);
 
     std::vector<int> encode(const std::string& text,
                             bool add_bos = false,
@@ -52,9 +58,9 @@ public:
 private:
     BpeTokenizer() = default;
 
-    static std::vector<std::string> LoadVocab(const std::string& vocab_path);
+    static std::vector<std::string> LoadVocab(const std::string& vocab_path, bool literal_bytes = false);
     static std::unordered_map<std::string, int> BuildTokenToId(const std::vector<std::string>& id_to_token);
-    static std::unordered_map<std::string, int> LoadMergesRank(const std::string& merges_path);
+    static std::unordered_map<std::string, int> LoadMergesRank(const std::string& merges_path, bool literal_records = false);
     void EnsureSpecialTokens(const SpecialTokensConfig& spec, bool add_if_missing);
     static std::vector<std::string> PretokenizeSentencePiece(const std::string& text);
 
@@ -71,6 +77,17 @@ private:
     void InitByteMaps();
     std::string ByteEncode(const std::string& text) const;
     std::string ByteDecode(const std::string& text) const;
+
+    struct MiniCPMData {
+        std::vector<std::array<uint32_t,3>> ranges;
+        std::unordered_map<uint32_t,std::vector<uint32_t>> decompositions;
+        std::unordered_map<uint32_t,unsigned> combining_classes;
+        std::unordered_map<uint64_t,uint32_t> compositions;
+        std::unordered_set<int> special_ids;
+    };
+    uint32_t MiniCPMFlags(uint32_t cp) const;
+    std::string NormalizeMiniCPMNFC(const std::string& text) const;
+    std::vector<std::string> PretokenizeMiniCPM(const std::string& text) const;
 
     static std::string PairKey(const std::string& a, const std::string& b);
 
@@ -90,6 +107,9 @@ private:
     bool use_byte_encoder_ = false;
     std::vector<uint32_t> byte_encoder_;
     std::map<uint32_t, uint8_t> byte_decoder_;
+
+    std::shared_ptr<const MiniCPMData> minicpm_;
+    std::string vocab_path_, merges_path_;
 
     mutable std::unordered_map<std::string, std::vector<std::string>> bpe_cache_;
     mutable std::mutex cache_mu_;
