@@ -31,6 +31,11 @@
 
 本项目源自 **nihui** 对 ncnn `kvcache` 的实验性工作，并在此基础上扩展出可复用的示例、模型加载、分词器、视觉预处理、OCR 推理和嵌入模型 API。
 
+> **Fork 说明**：本仓库是 [futz12/ncnn_llm](https://github.com/futz12/ncnn_llm) 的 fork，
+> 新增了完整的 **Xiaomi-OCR-0 部署案例** —— 包含推理内核级 bug 修复
+> （int8 GEMM、RMSNormGated reshape、token 对齐）、int8/fp32 量化推理流程，
+> 以及端到端 OCR 验证。详见 [Xiaomi-OCR-0 部署案例](#xiaomi-ocr-0-部署案例)。
+
 ## 特性
 
 - 统一的聊天和视觉语言模型 CLI 示例
@@ -75,7 +80,7 @@
 递归克隆项目仓库（参考 LiteOCR、wan-ncnn-vulkan 等项目，内嵌 ncnn 官方算子支持）：
 
 ```bash
-git clone --recursive https://github.com/futz12/ncnn_llm.git
+git clone --recursive https://github.com/zaidao2023/ncnn_llm.git
 cd ncnn_llm
 ```
 

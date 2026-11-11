@@ -31,6 +31,11 @@
 
 The project started from **nihui's** experimental ncnn `kvcache` work and expands it into reusable examples, model loaders, tokenizers, vision preprocessing, OCR inference, and embedding APIs.
 
+> **Fork note**: This repository is a fork of [futz12/ncnn_llm](https://github.com/futz12/ncnn_llm)
+> with a complete **Xiaomi-OCR-0 deployment case** — including kernel-level bug fixes
+> (int8 GEMM, RMSNormGated reshape, token alignment), an int8/fp32 quantized pipeline,
+> and end-to-end OCR verification. See [Xiaomi-OCR-0 Deployment Case](#xiaomi-ocr-0-deployment-case).
+
 ## Highlights
 
 - Unified CLI runner for chat and vision-language models
@@ -75,7 +80,7 @@ The project started from **nihui's** experimental ncnn `kvcache` work and expand
 Clone repository with submodules (ncnn bundled as submodule, following LiteOCR / wan-ncnn-vulkan conventions):
 
 ```bash
-git clone --recursive https://github.com/futz12/ncnn_llm.git
+git clone --recursive https://github.com/zaidao2023/ncnn_llm.git
 cd ncnn_llm
 ```
 
