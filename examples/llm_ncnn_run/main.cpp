@@ -41,7 +41,7 @@ int main(int argc, char** argv) {
 
         TemplateType template_type = detect_template_type(opt.model_path);
 
-        ncnn_llm_gpt model(opt.model_path, opt.use_vulkan, opt.num_threads, opt.vulkan_device);
+        ncnn_llm_gpt model(opt.model_path, opt.use_vulkan, opt.num_threads, opt.vulkan_device, opt.use_bf16, opt.force_naive);
         std::vector<json> builtin_tools = opt.enable_builtin_tools ? make_builtin_tools() : std::vector<json>();
         auto builtin_router = make_builtin_router();
 

@@ -17,6 +17,7 @@ void print_usage(const char* argv0) {
         << "  --model <path>             Model path (default: ./assets/qwen3_0.6b)\n"
         << "  --image <path>             Image path for VL models (optional)\n"
         << "  --use-vulkan               Enable Vulkan backend\n"
+        << "  --no-bf16                  Disable BF16 storage (use FP32 storage)\n"
         << "  --vulkan-device <index>    Vulkan device index (default: 0)\n"
         << "  --threads <num>            Number of CPU threads (default: auto)\n"
         << "  --max-new-tokens <num>     Maximum generated tokens (default: 512)\n"
@@ -50,6 +51,12 @@ Options parse_options(int argc, char** argv) {
         if (a == "--help" || a == "-h") {
             print_usage(argv[0]);
             std::exit(0);
+        } else if (a == "--no-bf16") {
+            opt.use_bf16 = false;
+        } else if (a == "--force-naive") {
+            opt.force_naive = true;
+        } else if (a == "--bf16") {
+            opt.use_bf16 = true;
         } else if (a == "--model") {
             if (i + 1 >= argc) {
                 std::cerr << "Missing value for --model\n";

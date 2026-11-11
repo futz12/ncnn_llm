@@ -31,6 +31,11 @@
 
 本项目源自 **nihui** 对 ncnn `kvcache` 的实验性工作，并在此基础上扩展出可复用的示例、模型加载、分词器、视觉预处理、OCR 推理和嵌入模型 API。
 
+> **Fork 说明**：本仓库是 [futz12/ncnn_llm](https://github.com/futz12/ncnn_llm) 的 fork，
+> 新增了完整的 **Xiaomi-OCR-0 部署案例** —— 包含推理内核级 bug 修复
+> （int8 GEMM、RMSNormGated reshape、token 对齐）、int8/fp32 量化推理流程，
+> 以及端到端 OCR 验证。详见 [Xiaomi-OCR-0 部署案例](#xiaomi-ocr-0-部署案例)。
+
 ## 特性
 
 - 统一的聊天和视觉语言模型 CLI 示例
@@ -75,7 +80,7 @@
 递归克隆项目仓库（参考 LiteOCR、wan-ncnn-vulkan 等项目，内嵌 ncnn 官方算子支持）：
 
 ```bash
-git clone --recursive https://github.com/futz12/ncnn_llm.git
+git clone --recursive https://github.com/zaidao2023/ncnn_llm.git
 cd ncnn_llm
 ```
 
@@ -209,6 +214,42 @@ cmake --build build --config Release --target ocr_main
 Generating text:
 Hello World 123
 ```
+
+### Xiaomi-OCR-0 部署案例
+
+Xiaomi-OCR-0（Qwen3.5-VL 混合架构：6 层 SDPA + 18 层 GatedDeltaRule）在 ncnn_llm 上的完整部署案例，
+包含模型导出、bug 修复、int8/fp32 量化推理全流程。
+
+```bash
+# 1. 导出（fp32 → bf16 + int8）
+python export/qwen35_export_xiaomi_ocr_0.py \
+    -m models/Xiaomi-OCR-0 \
+    -o models/Xiaomi-OCR-0_ncnn \
+    --int8-dir models/Xiaomi-OCR-0_ncnn_int8 --bits 8
+
+# 2. 运行 OCR（int8 模型）
+echo "Extract the text in the image." | ./build/llm_ncnn_run.exe \
+    --model models/Xiaomi-OCR-0_ncnn_int8 \
+    --image models/Xiaomi-OCR-0/example_pics/receipt.jpg \
+    --temperature 0 --threads 4 --enable-thinking --max-new-tokens 200
+```
+
+输出示例（receipt.jpg）：
+
+```text
+MR. D.I.Y. SDN BHD
+(CO.REG :704427-T)
+LOT 1851-A & 1853-B, JALAN KPB6,
+KAWASAN PERINDUSTRIAN BALAKONG,
+(CHERAS LEISURE MALL)-TAX INVOICE-
+```
+
+**案例要点**：
+- 导出脚本 `export/qwen35_export_xiaomi_ocr_0.py` 自动修复 pnnx 生成的 RMSNormGated reshape 表达式
+- 支持 int8（边缘部署，1.2GB）和 fp32（调试验证，6.4GB）两种精度
+- 4 张测试图（receipt/qianziwen/dense-equations/handwrite-formula）全部验证通过
+- 详细教程见 [docs/xiaomi-ocr-deploy-tutorial.md](docs/xiaomi-ocr-deploy-tutorial.md)
+- 调试历程与根因分析见 [docs/xiaomi-ocr-0-status.md](docs/xiaomi-ocr-0-status.md)
 
 ## 判别器 / 快速决策 (Laya)
 

@@ -315,7 +315,9 @@ void inject_image_embeds(std::vector<int>& token_ids, ncnn::Mat& token_embed, in
     image_pad_index = placeholder_index;
 
     memcpy(token_ids_injected.data(), token_ids.data(), placeholder_index * sizeof(int));
-    memset(token_ids_injected.data() + placeholder_index, image_pad_id, image_embeds.h * sizeof(int));
+    for (int i = 0; i < image_embeds.h; ++i) {
+        token_ids_injected[placeholder_index + i] = image_pad_id;
+    }
     memcpy(token_ids_injected.data() + placeholder_index + image_embeds.h,
            token_ids.data() + placeholder_index + 1,
            (token_ids.size() - 1 - placeholder_index) * sizeof(int));

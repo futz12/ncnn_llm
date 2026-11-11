@@ -22,4 +22,4 @@ __pycache__/
 /dist/
 /.xmake/
 /build*
-/models/
+/models/.learning/state.json

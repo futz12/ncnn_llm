@@ -31,6 +31,11 @@
 
 The project started from **nihui's** experimental ncnn `kvcache` work and expands it into reusable examples, model loaders, tokenizers, vision preprocessing, OCR inference, and embedding APIs.
 
+> **Fork note**: This repository is a fork of [futz12/ncnn_llm](https://github.com/futz12/ncnn_llm)
+> with a complete **Xiaomi-OCR-0 deployment case** — including kernel-level bug fixes
+> (int8 GEMM, RMSNormGated reshape, token alignment), an int8/fp32 quantized pipeline,
+> and end-to-end OCR verification. See [Xiaomi-OCR-0 Deployment Case](#xiaomi-ocr-0-deployment-case).
+
 ## Highlights
 
 - Unified CLI runner for chat and vision-language models
@@ -75,7 +80,7 @@ The project started from **nihui's** experimental ncnn `kvcache` work and expand
 Clone repository with submodules (ncnn bundled as submodule, following LiteOCR / wan-ncnn-vulkan conventions):
 
 ```bash
-git clone --recursive https://github.com/futz12/ncnn_llm.git
+git clone --recursive https://github.com/zaidao2023/ncnn_llm.git
 cd ncnn_llm
 ```
 
@@ -209,6 +214,42 @@ Example output:
 Generating text:
 Hello World 123
 ```
+
+### Xiaomi-OCR-0 Deployment Case
+
+A complete deployment case for Xiaomi-OCR-0 (Qwen3.5-VL hybrid: 6 SDPA + 18 GatedDeltaRule layers)
+on ncnn_llm, covering model export, bug fixes, and int8/fp32 quantized inference.
+
+```bash
+# 1. Export (fp32 -> bf16 + int8)
+python export/qwen35_export_xiaomi_ocr_0.py \
+    -m models/Xiaomi-OCR-0 \
+    -o models/Xiaomi-OCR-0_ncnn \
+    --int8-dir models/Xiaomi-OCR-0_ncnn_int8 --bits 8
+
+# 2. Run OCR (int8 model)
+echo "Extract the text in the image." | ./build/llm_ncnn_run.exe \
+    --model models/Xiaomi-OCR-0_ncnn_int8 \
+    --image models/Xiaomi-OCR-0/example_pics/receipt.jpg \
+    --temperature 0 --threads 4 --enable-thinking --max-new-tokens 200
+```
+
+Example output (receipt.jpg):
+
+```text
+MR. D.I.Y. SDN BHD
+(CO.REG :704427-T)
+LOT 1851-A & 1853-B, JALAN KPB6,
+KAWASAN PERINDUSTRIAN BALAKONG,
+(CHERAS LEISURE MALL)-TAX INVOICE-
+```
+
+**Highlights**:
+- Export script `export/qwen35_export_xiaomi_ocr_0.py` auto-fixes the RMSNormGated reshape expression from pnnx
+- Supports both int8 (edge deployment, 1.2GB) and fp32 (debug/validation, 6.4GB)
+- All 4 test images (receipt/qianziwen/dense-equations/handwrite-formula) verified
+- Full tutorial: [docs/xiaomi-ocr-deploy-tutorial.md](docs/xiaomi-ocr-deploy-tutorial.md)
+- Debug journey & root cause analysis: [docs/xiaomi-ocr-0-status.md](docs/xiaomi-ocr-0-status.md)
 
 ## Discriminator / Fast Decision (Laya)
 
