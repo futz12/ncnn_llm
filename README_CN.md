@@ -210,6 +210,42 @@ Generating text:
 Hello World 123
 ```
 
+### Xiaomi-OCR-0 部署案例
+
+Xiaomi-OCR-0（Qwen3.5-VL 混合架构：6 层 SDPA + 18 层 GatedDeltaRule）在 ncnn_llm 上的完整部署案例，
+包含模型导出、bug 修复、int8/fp32 量化推理全流程。
+
+```bash
+# 1. 导出（fp32 → bf16 + int8）
+python export/qwen35_export_xiaomi_ocr_0.py \
+    -m models/Xiaomi-OCR-0 \
+    -o models/Xiaomi-OCR-0_ncnn \
+    --int8-dir models/Xiaomi-OCR-0_ncnn_int8 --bits 8
+
+# 2. 运行 OCR（int8 模型）
+echo "Extract the text in the image." | ./build/llm_ncnn_run.exe \
+    --model models/Xiaomi-OCR-0_ncnn_int8 \
+    --image models/Xiaomi-OCR-0/example_pics/receipt.jpg \
+    --temperature 0 --threads 4 --enable-thinking --max-new-tokens 200
+```
+
+输出示例（receipt.jpg）：
+
+```text
+MR. D.I.Y. SDN BHD
+(CO.REG :704427-T)
+LOT 1851-A & 1853-B, JALAN KPB6,
+KAWASAN PERINDUSTRIAN BALAKONG,
+(CHERAS LEISURE MALL)-TAX INVOICE-
+```
+
+**案例要点**：
+- 导出脚本 `export/qwen35_export_xiaomi_ocr_0.py` 自动修复 pnnx 生成的 RMSNormGated reshape 表达式
+- 支持 int8（边缘部署，1.2GB）和 fp32（调试验证，6.4GB）两种精度
+- 4 张测试图（receipt/qianziwen/dense-equations/handwrite-formula）全部验证通过
+- 详细教程见 [docs/xiaomi-ocr-deploy-tutorial.md](docs/xiaomi-ocr-deploy-tutorial.md)
+- 调试历程与根因分析见 [docs/xiaomi-ocr-0-status.md](docs/xiaomi-ocr-0-status.md)
+
 ## 判别器 / 快速决策 (Laya)
 
 `ncnn_llm_laya` 支持 Convai 的 **Laya**（基于 ModernBERT-large）与 **Laya-Multilingual**（基于 mmBERT-base）判别器。每个模型由 `backbone`、`scorer` 和 `act_head` 三个 ncnn 子模型组成，用于 System 1 级别的意图识别、严重度打分与强化学习代理升级判断。
