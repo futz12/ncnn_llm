@@ -206,8 +206,7 @@ static std::string apply_chatml_template(
     if (add_generation_prompt) {
         prompt << "<|im_start|>assistant\n";
         if (enable_thinking) {
-            prompt << "<think>\n";
-        
+            prompt << "<think>\n\n</think>\n\n";
         }
     }
 
