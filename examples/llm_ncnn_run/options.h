@@ -6,6 +6,7 @@ struct Options {
     std::string model_path = "./assets/qwen3_0.6b";
     std::string image_path;
     bool use_vulkan = false;
+    bool use_bf16 = true;
     bool enable_builtin_tools = true;
     bool enable_thinking = false;
     int num_threads = 0;  // 0 = use ncnn::get_cpu_count()
@@ -18,6 +19,7 @@ struct Options {
     bool do_sample = false;
     bool enable_perf = false;
     int perf_level = 0;
+    bool force_naive = false;  // use naive GDR/ShortConv instead of x86 SIMD
 };
 
 Options parse_options(int argc, char** argv);
