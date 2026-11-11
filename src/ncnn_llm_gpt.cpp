@@ -1179,8 +1179,10 @@ std::shared_ptr<ncnn_llm_gpt_ctx> ncnn_llm_gpt::define_tools(const std::shared_p
 // Vision Helper Implementations
 
 int ncnn_llm_gpt::get_scaled_image_size(float scale, int size, int effective_patch_size) const {
-    float scaled_size_f = (float)size * scale;
-    int scaled_size = (int)(std::ceil(scaled_size_f / (float)effective_patch_size) * effective_patch_size);
+    // Align with HF smart_resize semantics (Python round = half-to-even)
+    double scaled = (double)size * scale / (double)effective_patch_size;
+    double rounded = std::rint(scaled);
+    int scaled_size = (int)rounded * effective_patch_size;
     return std::max(effective_patch_size, scaled_size);
 }
 
@@ -1351,7 +1353,7 @@ int ncnn_llm_gpt::get_visiual_features(const ncnn::Mat& bgr, ncnn::Mat& image_em
     int target_w, target_h;
     get_image_size_for_patches(img_h, img_w, patch_size, max_num_patches, target_h, target_w);
 
-    ncnn::Mat bgr_resized = ncnn_mat_resize(bgr, target_w, target_h);
+    ncnn::Mat bgr_resized = ncnn_mat_resize_bicubic(bgr, target_w, target_h);
 
     num_patches_w = (target_w + patch_size - 1) / patch_size;
     num_patches_h = (target_h + patch_size - 1) / patch_size;
