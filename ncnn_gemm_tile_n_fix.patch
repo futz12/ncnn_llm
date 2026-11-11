@@ -1,0 +1,20 @@
+diff --git a/src/layer/x86/gemm_x86.cpp b/src/layer/x86/gemm_x86.cpp
+index f50f4970..1066d193 100644
+--- a/src/layer/x86/gemm_x86.cpp
++++ b/src/layer/x86/gemm_x86.cpp
+@@ -2994,6 +2994,15 @@ static int gemm_x86(const Mat& A, const Mat& B, const Mat& C, Mat& top_blob, int
+     int TILE_M, TILE_N, TILE_K;
+     get_optimal_tile_mnk(M, N, K, constant_TILE_M, constant_TILE_N, constant_TILE_K, TILE_M, TILE_N, TILE_K, nT);
+ 
++    // constantB pre-packing calls get_optimal_tile_mnk with M=0 (M<=1 branch),
++    // which may select a smaller TILE_N than the forward pass (M>1 branch).
++    // Infer the real TILE_N from the pre-packed BT_data to avoid channel misalignment.
++    if (BT.w > 0 && TILE_K > 0 && BT.w % TILE_K == 0)
++    {
++        int bttile_n = BT.w / TILE_K;
++        if (bttile_n < TILE_N) TILE_N = bttile_n;
++    }
++
+     // NCNN_LOGE("TILE M/N/K = %d %d %d", TILE_M, TILE_N, TILE_K);
+ 
+     const int nn_M = (M + TILE_M - 1) / TILE_M;

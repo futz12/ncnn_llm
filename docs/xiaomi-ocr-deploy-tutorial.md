@@ -232,18 +232,19 @@ const int total_prompt_tokens = (int)token_ids.size();   // = 1500
 
 ### 5.3 修复 ncnn 子模块的 GEMM bug（如需要）
 
-**问题**：ncnn 子模块的 `gemm_wq_int8.h` / `gemm_x86.cpp` / `gemm_bf16s.h` 在 perf 提交
-（`ab44b901` "32-col multi-panel unrolling"）中破坏了 block-int8 GEMM 的 descale/布局。
+**问题**：ncnn 的 `gemm_BT_x86` 在 **constantB（权重预打包）** 路径下，
+`TILE_N` 与 `create_pipeline` 打包时不一致，导致 block-int8 GEMM 列错位
+（详见 [xiaomi-ocr-0-status.md](xiaomi-ocr-0-status.md) Bug 1）。
 
-**修复**：回退到上游稳定提交 `dcf9478e`，然后重打 fp32 vision TILE_N 补丁：
+**修复**：切换到稳定提交 `dcf9478e`，然后打上本仓库提供的补丁：
 
 ```bash
 cd ncnn
-git stash                                    # 暂存本地修改（如有）
-git checkout dcf9478e -- src/layer/x86/gemm_wq_int8.h src/layer/x86/gemm_x86.cpp src/layer/x86/gemm_bf16s.h
+git checkout dcf9478e
+git apply ../ncnn_gemm_tile_n_fix.patch
 ```
 
-然后在 `gemm_x86.cpp` 的 `gemm_BT_x86` 函数中，`get_optimal_tile_mnk` 调用之后加入：
+补丁内容（9 行，加在 `gemm_BT_x86` 的 `get_optimal_tile_mnk` 之后）：
 
 ```cpp
 // constantB pre-packing calls get_optimal_tile_mnk with M=0 (M<=1 branch),
